@@ -635,6 +635,12 @@ func (m *M) slotHas(sl byte, a uint16) bool {
 	case slotBIOS:
 		return page == 0
 	case slotCart:
+		if m.diskMachine() {
+			// No cartridge on a disk machine: the slot a cartridge
+			// would be in holds the disk ROM instead, which is
+			// sixteen K in page one. See diskROMByte.
+			return page == 1
+		}
 		return page == 1 || page == 2
 	case slotRAM:
 		return true
@@ -655,8 +661,159 @@ func (m *M) slotRead(sl byte, a uint16) byte {
 	if !m.slotHas(sl, a) {
 		return 0xFF
 	}
+	if sl&3 == slotCart && m.diskMachine() {
+		return diskROMByte(a)
+	}
 	if sl&3 == slotRAM && a < 0xC000 {
 		return 0
 	}
 	return m.Mem[a]
+}
+
+// diskMachine reports a machine booted from a floppy rather than from a
+// cartridge: there is no cartridge image, so nothing owns page one but
+// the disk ROM.
+func (m *M) diskMachine() bool { return m.Disk != nil && len(m.mem.rom) == 0 }
+
+// diskROMByte is what a slot scan reads out of the disk ROM.
+//
+// A game looking for the disk ROM does what every MSX program does to
+// find anything: read the two signature bytes at 4000h and the eight
+// pointers after them, in every slot, and then read the jump table.
+// Snatcher does exactly that and then calls DSKIO in the slot it found,
+// which is why answering the scan with whatever happened to be in RAM
+// sent it into nonsense.
+//
+// Each table entry is a jump to itself, so a program that follows the
+// pointer instead of calling the entry lands on the same address -- and
+// that address is shimmed. Nothing here is ever executed; it is only
+// ever read, because the entries are intercepted. See diskROM.
+func diskROMByte(a uint16) byte {
+	switch {
+	case a == 0x4000:
+		return 'A'
+	case a == 0x4001:
+		return 'B'
+	case a >= 0x4002 && a <= 0x400F:
+		// No INIT, no STATEMENT, no DEVICE, no TEXT: this ROM is
+		// reached through its jump table and nothing else.
+		return 0
+	case a >= dskIO && a < dskLast:
+		switch (a - dskIO) % 3 {
+		case 0:
+			return 0xC3 // jp
+		case 1:
+			return byte(a - 1)
+		default:
+			return byte((a - 2) >> 8)
+		}
+	}
+	return 0xFF
+}
+
+// chPut writes one character where the cursor is, which is what the BIOS
+// entry at 00A2h does and what every DOS console call is built on.
+//
+// No game so far has needed it: they all draw their own screens. A disk
+// program is different -- it prints before it draws, and Snatcher's boot
+// says which disk it came from -- so this handles the control codes a
+// message uses and nothing more: return, line feed, backspace, and the
+// wrap and scroll that come of running off the edge.
+//
+// A bitmap screen has no name table to put a character in, so the glyph
+// is drawn from the character set instead, one row of eight pixels at a
+// time. See biosFont.
+func (m *M) chPut(c byte) {
+	w := int(m.Mem[linL40+2])
+	if w <= 0 {
+		w = 32
+	}
+	rows := int(m.Mem[crtCnt])
+	if rows <= 0 {
+		rows = 24
+	}
+	x, y := int(m.Mem[csrX])-1, int(m.Mem[csrY])-1
+	switch c {
+	case 0x0D: // return
+		x = 0
+	case 0x0A: // line feed
+		y++
+	case 0x08: // backspace
+		if x > 0 {
+			x--
+			m.putGlyph(x, y, ' ', w)
+		}
+	default:
+		if c >= 0x20 {
+			m.putGlyph(x, y, c, w)
+			x++
+		}
+	}
+	if x >= w {
+		x, y = 0, y+1
+	}
+	if y >= rows {
+		y = rows - 1
+		m.scrollUp(w, rows)
+	}
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+	m.Mem[csrX], m.Mem[csrY] = byte(x+1), byte(y+1)
+}
+
+// putGlyph puts one character on the screen: in the name table on a text
+// screen, and as eight rows of pixels on a bitmap one.
+func (m *M) putGlyph(x, y int, c byte, w int) {
+	mode := int(m.Mem[scrMod])
+	if mode <= 4 {
+		nam := int(m.wa16(screenTableBase(mode)))
+		m.vramWrite(nam+y*w+x, c)
+		return
+	}
+	fg := m.Mem[forClr] & 0x0F
+	bg := m.Mem[bakClr] & 0x0F
+	for row := 0; row < 8; row++ {
+		bits := m.Mem[(fontTable+int(c)*8+row)&0xFFFF]
+		for col := 0; col < 8; col++ {
+			v := bg
+			if bits&(0x80>>uint(col)) != 0 {
+				v = fg
+			}
+			m.VDP.setPixel(x*8+col, y*8+row, v, 0)
+		}
+	}
+}
+
+// scrollUp moves the screen up a line, which is what happens when the
+// cursor runs off the bottom.
+func (m *M) scrollUp(w, rows int) {
+	mode := int(m.Mem[scrMod])
+	if mode <= 4 {
+		nam := int(m.wa16(screenTableBase(mode)))
+		for y := 1; y < rows; y++ {
+			for x := 0; x < w; x++ {
+				m.vramWrite(nam+(y-1)*w+x,
+					m.VDP.VRAM[m.VDP.phys(m.vramBase()+nam+y*w+x)])
+			}
+		}
+		for x := 0; x < w; x++ {
+			m.vramWrite(nam+(rows-1)*w+x, ' ')
+		}
+		return
+	}
+	for y := 8; y < rows*8; y++ {
+		for x := 0; x < w*8; x++ {
+			m.VDP.setPixel(x, y-8, m.VDP.getPixel(x, y), 0)
+		}
+	}
+	bg := m.Mem[bakClr] & 0x0F
+	for y := (rows - 1) * 8; y < rows*8; y++ {
+		for x := 0; x < w*8; x++ {
+			m.VDP.setPixel(x, y, bg, 0)
+		}
+	}
 }

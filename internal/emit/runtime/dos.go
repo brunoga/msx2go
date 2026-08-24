@@ -60,6 +60,18 @@ func (m *M) dos() {
 		m.DOSTrace(fn, de)
 	}
 	switch fn {
+	case 0x02: // write the character in E to the console
+		m.chPut(m.E)
+		m.A = 0
+	case 0x09: // write the string at DE, which ends at a dollar sign
+		for a, n := de, 0; n < 0x4000; a, n = a+1, n+1 {
+			c := m.rd(a)
+			if c == '$' {
+				break
+			}
+			m.chPut(c)
+		}
+		m.A = 0
 	case 0x0C: // return the version
 		m.setHL(0x0022)
 		m.A = 0

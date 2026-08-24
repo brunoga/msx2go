@@ -362,6 +362,9 @@ func (m *M) bios(addr uint16) {
 
 	// ---- Keyboard ------------------------------------------------------
 
+	case 0x00A2: // CHPUT  put the character in A where the cursor is
+		m.chPut(m.A)
+
 	case 0x009C: // CHSNS  Z when nothing is waiting
 		m.Fz = m.keyEvent(false) == 0
 	case 0x009F: // CHGET  wait for a character
@@ -433,8 +436,15 @@ func (m *M) bios(addr uint16) {
 
 	case 0x001C: // CALSLT  call the routine at IX in the slot named by IY
 		// Every page is mapped here, so the slot is already right and
-		// this is an ordinary call.
-		m.run(m.IX)
+		// this is an ordinary call -- unless the routine is one this
+		// machine shims rather than holds, which is how a game that
+		// found the disk ROM by scanning the slots calls DSKIO. Going
+		// straight to IX there would execute whatever RAM is at 4010h.
+		if m.isBIOS(m.IX) {
+			m.bios(m.IX)
+		} else {
+			m.run(m.IX)
+		}
 
 	default:
 		m.biosUnknown(addr)
