@@ -50,6 +50,11 @@ func main() {
 	shot := flag.String("png", "", "write the last frame here")
 	tape := flag.String("tape", "", "keyboard tape to play back")
 	trail := flag.Int("trail", 0, "print the first N instructions executed")
+	trailFrom := flag.Int("trailfrom", -1, "start -trailout's trace the "+
+		"first time this address executes")
+	trailN := flag.Int("trailN", 200000, "how many addresses -trailout records")
+	trailOut := flag.String("trailout", "", "write executed addresses here, "+
+		"one per line, from -trailfrom on")
 	bankwatch := flag.Int("bankwatch", -1, "report every bank switch of this "+
 		"page, with the code that made it")
 	bankFrom := flag.Int("bankfrom", 0, "only report bank switches from this "+
@@ -277,6 +282,31 @@ func main() {
 				fmt.Fprintf(&b, "%d", x)
 			}
 			seen[b.String()] = true
+		}
+	}
+
+	if *trailOut != "" {
+		f, err := os.Create(*trailOut)
+		check(err)
+		w := bufio.NewWriter(f)
+		defer func() { w.Flush(); f.Close() }()
+		armed := *trailFrom < 0
+		n := 0
+		prev := m.Observe
+		m.Observe = func(pc uint16, banks []int) {
+			if prev != nil {
+				prev(pc, banks)
+			}
+			if !armed {
+				armed = pc == uint16(*trailFrom)
+				if !armed {
+					return
+				}
+			}
+			if n < *trailN {
+				fmt.Fprintf(w, "%04X\n", pc)
+				n++
+			}
 		}
 	}
 
