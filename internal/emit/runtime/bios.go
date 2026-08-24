@@ -683,6 +683,13 @@ func (m *M) InstallSystemBytes() {
 		m.Mem[a] = 0x8B
 	}
 
+	// Page zero as the BIOS leaves it, before anything else can write
+	// over it. A program running under the disk operating system has
+	// its own RAM there and still asks the BIOS's slot for these bytes
+	// -- the video ports at 0006h and 0007h above all, which MSX-DOS's
+	// own entry jump at 0005h happens to sit on top of.
+	m.bios0 = append([]byte(nil), m.Mem[:0x4000]...)
+
 	m.installWorkArea()
 
 	// The hook table. Every one of the BIOS's expansion hooks is five

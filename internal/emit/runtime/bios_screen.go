@@ -664,6 +664,11 @@ func (m *M) slotRead(sl byte, a uint16) byte {
 	if sl&3 == slotCart && m.diskMachine() {
 		return diskROMByte(a)
 	}
+	if sl&3 == slotBIOS && a < 0x4000 && m.bios0 != nil {
+		// The BIOS's own page zero, which is a different memory from
+		// the one the processor is reading through page zero now.
+		return m.bios0[a]
+	}
 	if sl&3 == slotRAM && a < 0xC000 && !m.diskMachine() {
 		// On a cartridge machine the RAM slot answers with an
 		// untouched byte where the cartridge is paged in, so a
