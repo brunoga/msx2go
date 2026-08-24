@@ -425,6 +425,17 @@ func (m *M) InterruptEntry() (uint16, bool) {
 			return m.rd16(h + 1), true
 		}
 	}
+	// No hook -- but a program that owns page zero does not need one. With
+	// RAM there, the interrupt vector itself is the program's: Snatcher
+	// copies its handler straight to 0038h and leaves the BIOS hooks
+	// alone, because there is no BIOS under it to call them. The one byte
+	// that distinguishes a handler from an empty machine is the first:
+	// RAM cleared at boot holds zeroes, and a real handler starts with
+	// an instruction. Snatcher's starts with di, which is also what any
+	// interrupt handler on this processor starts with.
+	if m.PrimarySlot&3 == 3 && m.Mem[0x0038] != 0 {
+		return 0x0038, true
+	}
 	return 0, false
 }
 
