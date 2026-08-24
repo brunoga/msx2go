@@ -43,7 +43,12 @@ func (m *M) BootDisk(d *Disk, start string) error {
 	m.IFF = false
 	m.IM = 1
 	m.SP = 0xF380
-	m.Disk = d
+	if len(m.images) == 0 || m.images[0] != d {
+		m.Disk = d
+		m.AddDisk(d)
+		m.Insert(0, len(m.images)-1)
+	}
+	m.syncDisk()
 
 	if start == "" {
 		start = m.DiskRun

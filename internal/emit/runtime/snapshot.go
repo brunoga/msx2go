@@ -127,6 +127,24 @@ func (m *M) walk(s snapper) {
 	s.bool(&m.VDP.latched)
 	s.u64(&m.VDP.Frame)
 
+	// Which floppy is in which drive, and which drive the disk calls
+	// act on. The images themselves belong to whoever built the
+	// machine, the way Disk does -- but where a player got to in a
+	// three-disk game is state, and restoring with the wrong disk in
+	// the drive would be a snapshot that lies. See disks.go.
+	nd := len(m.inDrive)
+	s.int(&nd)
+	if s.reading() && nd != len(m.inDrive) {
+		m.inDrive = make([]int, nd)
+	}
+	for i := range m.inDrive {
+		s.int(&m.inDrive[i])
+	}
+	s.int(&m.curDrive)
+	if s.reading() {
+		m.syncDisk()
+	}
+
 	s.bytes(m.PSG.Reg[:])
 
 	// The sound chip in the mapper, where there is one.

@@ -152,6 +152,12 @@ type M struct {
 	// Disk is the floppy this machine booted from, where it booted from
 	// one. The cartridge shape of machine leaves it nil.
 	Disk *Disk
+	// images are every floppy the machine was given and inDrive says
+	// which is in each drive; curDrive is the one the disk calls act
+	// on. A three-disk game is three images and one drive. See disks.go.
+	images   []*Disk
+	inDrive  []int
+	curDrive int
 
 	// dma is where the disk function calls read to and write from, which
 	// a program sets with function 1Ah. MSX-DOS starts it at 0080h.

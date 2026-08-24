@@ -239,16 +239,37 @@ func interpreted(rom []byte, info z80.Info, out, modpath string, base uint16) er
 // directory, and the shape of the program from booting it and watching.
 func disk(path, name, out, modpath, machine, runBas string,
 	exploreBudget int, interpretOnly bool) error {
-	img, err := os.ReadFile(path)
-	if err != nil {
-		return err
+	// One floppy, or several separated by commas: a game that shipped
+	// on three disks is converted whole, all three inside the program,
+	// and swapping between them is a keypress rather than a file hunt.
+	var img []byte
+	var sizes []int
+	var disks []*z80.Disk
+	for _, one := range strings.Split(path, ",") {
+		one = strings.TrimSpace(one)
+		if one == "" {
+			continue
+		}
+		raw, err := os.ReadFile(one)
+		if err != nil {
+			return err
+		}
+		one, err := z80.NewDisk(raw)
+		if err != nil {
+			return err
+		}
+		img = append(img, raw...)
+		sizes = append(sizes, len(raw))
+		disks = append(disks, one)
 	}
-	d, err := z80.NewDisk(img)
-	if err != nil {
-		return err
+	if len(disks) == 0 {
+		return fmt.Errorf("-dsk named no image")
 	}
+	d := disks[0]
 	if name == "" {
-		name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		first := strings.Split(path, ",")[0]
+		name = strings.TrimSuffix(filepath.Base(first),
+			filepath.Ext(first))
 	}
 	guessMachine := machine == ""
 	if guessMachine {
@@ -258,14 +279,26 @@ func disk(path, name, out, modpath, machine, runBas string,
 	fmt.Printf("%s\n", name)
 	fmt.Printf("  image    %d bytes (%d KB), SHA-1 %s\n",
 		len(img), len(img)/1024, hex.EncodeToString(sum[:]))
-	fmt.Printf("  medium   floppy, %d files\n", len(d.Files()))
-	for _, f := range d.Files() {
-		fmt.Printf("    %-14s %7d\n", f.Name, f.Size)
+	for n, one := range disks {
+		if len(disks) > 1 {
+			label := one.Label()
+			if label == "" {
+				label = "no label"
+			}
+			fmt.Printf("  disk %d   %s, %d files\n", n+1, label,
+				len(one.Files()))
+		} else {
+			fmt.Printf("  medium   floppy, %d files\n", len(one.Files()))
+		}
+		for _, f := range one.Files() {
+			fmt.Printf("    %-14s %7d\n", f.Name, f.Size)
+		}
 	}
 
 	info := z80.Info{
 		Name: name, Machine: machine, Mapper: z80.Mapper{},
 		Size: len(img), Fill: 0x00, Floppy: true, Run: runBas,
+		DiskSizes: sizes,
 	}
 	// The same question a cartridge is asked: does the program settle into
 	// an idle loop and work from its interrupt handler, or is the loop the
@@ -274,7 +307,9 @@ func disk(path, name, out, modpath, machine, runBas string,
 	var starts []uint16
 	{
 		probe := z80.New(nil, z80.Mapper{})
-		probe.Disk = d
+		for _, one := range disks {
+			probe.AddDisk(one)
+		}
 		probe.DiskRun = runBas
 		if err := probe.BootDisk(d, runBas); err != nil {
 			return fmt.Errorf("booting %s: %w", path, err)
@@ -322,7 +357,9 @@ func disk(path, name, out, modpath, machine, runBas string,
 				before := len(seen)
 				freshDisk := func() *z80.M {
 					mm := z80.New(nil, z80.Mapper{})
-					mm.Disk = d
+					for _, one := range disks {
+						mm.AddDisk(one)
+					}
 					return mm
 				}
 				explore(probe, freshDisk, exploreBudget, seen)

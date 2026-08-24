@@ -87,6 +87,10 @@ func main() {
 		state:  *state,
 		border: *border}
 	startAudio(g.snd)
+	if n := m.Images(); n > 1 {
+		fmt.Fprintf(os.Stderr, "__NAME__: %d floppies; F12 inserts the "+
+			"next one. %s is in the drive.\n", n, m.ImageName(m.Mounted(0)))
+	}
 
 	w, h := z80.ScreenWidth, z80.ScreenHeight
 	if *border {
@@ -263,14 +267,16 @@ func (g *game) Update() error {
 }
 
 // hotkeys are the harness's own: F9 saves a snapshot, F10 restores one, F11
-// fills the screen. They act on the press rather than for as long as the key
-// is held, and none of them is a key an MSX has, so none is taken from the
-// cartridge.
+// fills the screen, and F12 puts the next floppy in the drive for a game
+// that shipped on more than one. They act on the press rather than for as
+// long as the key is held, and none of them is a key an MSX has, so none is
+// taken from the cartridge.
 func (g *game) hotkeys() {
 	if g.held == nil {
 		g.held = map[ebiten.Key]bool{}
 	}
-	for _, k := range []ebiten.Key{ebiten.KeyF9, ebiten.KeyF10, ebiten.KeyF11} {
+	for _, k := range []ebiten.Key{ebiten.KeyF9, ebiten.KeyF10,
+		ebiten.KeyF11, ebiten.KeyF12} {
 		down := ebiten.IsKeyPressed(k)
 		if down && !g.held[k] {
 			switch k {
@@ -280,10 +286,22 @@ func (g *game) hotkeys() {
 				g.load()
 			case ebiten.KeyF11:
 				ebiten.SetFullscreen(!ebiten.IsFullscreen())
+			case ebiten.KeyF12:
+				g.swap()
 			}
 		}
 		g.held[k] = down
 	}
+}
+
+// swap answers an "insert disk 2" prompt: the next floppy goes in the
+// drive, and round again after the last one.
+func (g *game) swap() {
+	if g.m.Images() < 2 {
+		return
+	}
+	n := g.m.SwapNext(0)
+	fmt.Fprintf(os.Stderr, "__NAME__: inserted %s\n", g.m.ImageName(n))
 }
 
 func (g *game) save() {

@@ -196,21 +196,43 @@ func main() {
 	var data []byte
 	var err error
 	if *dsk != "" {
-		var img []byte
-		img, err = os.ReadFile(*dsk)
-		check(err)
-		var d *z80.Disk
-		d, err = z80.NewDisk(img)
-		check(err)
+		// One image, or several separated by commas: a game that
+		// ships on three floppies is three images and one drive, and
+		// -swap says which is in it. See disks.go.
+		var disks []*z80.Disk
+		for _, name := range strings.Split(*dsk, ",") {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			var img []byte
+			img, err = os.ReadFile(name)
+			check(err)
+			var d *z80.Disk
+			d, err = z80.NewDisk(img)
+			check(err)
+			disks = append(disks, d)
+		}
+		if len(disks) == 0 {
+			fmt.Fprintln(os.Stderr, "msxrun: -dsk named no image")
+			os.Exit(2)
+		}
 		if *dskList {
-			for _, f := range d.Files() {
-				fmt.Printf("%-14s %7d\n", f.Name, f.Size)
+			for i, d := range disks {
+				if len(disks) > 1 {
+					fmt.Printf("-- image %d\n", i+1)
+				}
+				for _, f := range d.Files() {
+					fmt.Printf("%-14s %7d\n", f.Name, f.Size)
+				}
 			}
 			return
 		}
 		// A disk machine is all RAM: no cartridge, no mapper.
 		m = z80.New(nil, z80.Mapper{})
-		m.Disk = d
+		for _, d := range disks {
+			m.AddDisk(d)
+		}
 		if *dosLog {
 			m.DOSTrace = func(fn byte, de uint16) {
 				name := ""

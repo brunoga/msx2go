@@ -78,6 +78,24 @@ interpreting, which is always correct and merely slower.
 If the game writes its floppy (a high-score file, a level editor), the
 changed image is written back beside the save state on exit.
 
+### Games on more than one floppy
+
+Name them together, in order, and the first is the one that boots:
+
+    msx2go -dsk disk1.dsk,disk2.dsk,disk3.dsk -out ./gamego
+
+All of them go into the generated program, so "insert disk 2" is a
+keypress -- **F12** puts the next floppy in the drive -- rather than a
+file to go and find. `msxrun -dsk a.dsk,b.dsk` takes the same list.
+
+The machine has drives as well as disks, and they are not the same
+thing: three floppies and one drive is a game that asks you to swap,
+while two drives hold two floppies at once and never ask. Both work.
+BDOS's select-drive and current-drive calls answer honestly, a file
+control block naming drive A or B gets that drive, and absolute sector
+reads use the drive in L. Which floppy is in which drive is saved in a
+snapshot, because it is part of where a player got to.
+
 ## The output module
 
     gamego/

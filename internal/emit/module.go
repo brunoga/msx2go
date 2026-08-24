@@ -445,6 +445,9 @@ func (m Module) meta() ([]byte, error) {
 	if m.Info.Run != "" {
 		f("\tRun: %q,", m.Info.Run)
 	}
+	if len(m.Info.DiskSizes) > 1 {
+		f("\tDiskSizes: []int{%s},", ints(m.Info.DiskSizes))
+	}
 	if m.Info.TransSHA1 != "" {
 		f("\tTransBase: 0x%04X,", m.Info.TransBase)
 		f("\tTransSize: %d,", m.Info.TransSize)

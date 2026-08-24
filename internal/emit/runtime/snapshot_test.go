@@ -113,9 +113,11 @@ func TestSnapshotRejectsAnotherCartridge(t *testing.T) {
 //     Executed, which is a diagnostic counter; and
 //   - Disk, which is the image the machine booted from, not state it
 //     changed. Its written sectors are saved beside it, not in a snapshot,
-//     and dma, files, searchFor and searchAt go with it.
+//     and dma, files, searchFor and searchAt go with it -- and so does
+//     images, the floppies the machine was handed. Which of them is in
+//     which drive *is* state, so inDrive and curDrive are saved.
 func TestSnapshotCoversTheMachine(t *testing.T) {
-	const known = 97
+	const known = 100
 	if n := reflect.TypeOf(M{}).NumField(); n != known {
 		t.Errorf("M has %d fields, this test was written against %d. "+
 			"A new one may need adding to walk in snapshot.go.", n, known)

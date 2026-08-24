@@ -70,6 +70,10 @@ type Info struct {
 	// that has more than one and no AUTOEXEC.BAS to choose. Recorded at
 	// generation time from the -run the conversion was made with.
 	Run string
+	// DiskSizes is how the image splits into floppies, for a game that
+	// shipped on more than one. Empty means the single image every
+	// other field already describes. See Info.Floppies.
+	DiskSizes []int
 	// TransBase, TransSize and TransSHA1 describe the RAM a disk's
 	// translation was made from: the code the loader put there, hashed
 	// the moment the loader finished. At the same moment at run time
@@ -204,6 +208,27 @@ func (i Info) Image(blocks []Block) []byte {
 	return img
 }
 
+// Floppies splits the image into the floppies it holds: one for an
+// ordinary disk game, three for one that shipped on three. They are
+// concatenated in order, which is why the sizes have to be recorded --
+// a floppy has no header saying where it ends.
+func (i Info) Floppies(blocks []Block) [][]byte {
+	img := i.Image(blocks)
+	if len(i.DiskSizes) < 2 {
+		return [][]byte{img}
+	}
+	out := make([][]byte, 0, len(i.DiskSizes))
+	at := 0
+	for _, n := range i.DiskSizes {
+		if at+n > len(img) {
+			break
+		}
+		out = append(out, img[at:at+n])
+		at += n
+	}
+	return out
+}
+
 // Open loads the data and returns a machine ready for Boot.
 func (i Info) Open(path string) (*M, error) {
 	blocks, _, err := i.Blocks(path)
@@ -212,13 +237,20 @@ func (i Info) Open(path string) (*M, error) {
 	}
 	if i.Floppy {
 		// A disk machine is all RAM: the image is the floppy, not
-		// something paged into the address space.
-		d, err := NewDisk(i.Image(blocks))
-		if err != nil {
-			return nil, err
-		}
+		// something paged into the address space. A game that
+		// shipped on several floppies carries all of them, and the
+		// first one is the one in the drive. See disks.go.
 		m := New(nil, Mapper{})
-		m.Disk = d
+		for _, img := range i.Floppies(blocks) {
+			d, err := NewDisk(img)
+			if err != nil {
+				return nil, err
+			}
+			m.AddDisk(d)
+		}
+		if m.Disk == nil {
+			return nil, fmt.Errorf("%s: no floppy in the data", i.Name)
+		}
 		// The recorded shape is what booting settled into, not where
 		// booting starts: the BASIC loader's inline BLOAD ,R decides
 		// main-thread-ness as it runs, and every one of its checks

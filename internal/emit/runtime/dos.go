@@ -48,10 +48,13 @@ func (m *M) dos() {
 	case 0x0C: // return the version
 		m.setHL(0x0022)
 		m.A = 0
-	case 0x0D, 0x0E: // reset the disk system, select a drive
+	case 0x0D: // reset the disk system
 		m.A = 0
-	case 0x19: // which drive is current: always the only one there is
-		m.A = 0
+	case 0x0E: // select a drive: E names it, counted from zero
+		m.SelectDrive(int(m.E))
+		m.A = byte(m.CurrentDrive())
+	case 0x19: // which drive is current
+		m.A = byte(m.CurrentDrive())
 	case 0x0F: // open a file
 		m.A = 0xFF
 		if f := m.dosOpen(de); f != nil {
@@ -135,10 +138,14 @@ func (m *M) dos() {
 		// real machine: B holds garbage there)
 		sec := int(m.DE())
 		cnt := int(m.H)
+		disk := m.Disk
+		if d := m.DriveDisk(int(m.L)); d != nil {
+			disk = d
+		}
 		m.A = 0
 		for i := 0; i < cnt; i++ {
 			if fn == 0x2F {
-				b := m.Disk.ReadSector(sec + i)
+				b := disk.ReadSector(sec + i)
 				if b == nil {
 					m.A = 0xFF
 					break
@@ -147,11 +154,11 @@ func (m *M) dos() {
 					m.Mem[m.dma+uint16(i*len(b)+j)] = v
 				}
 			} else {
-				b := make([]byte, m.Disk.bps)
+				b := make([]byte, disk.bps)
 				for j := range b {
 					b[j] = m.Mem[m.dma+uint16(i*len(b)+j)]
 				}
-				if !m.Disk.WriteSector(sec+i, b) {
+				if !disk.WriteSector(sec+i, b) {
 					m.A = 0xFF
 					break
 				}
@@ -167,8 +174,13 @@ func (m *M) dos() {
 // written back when it is closed, which is what makes a partly written
 // directory impossible.
 type dosFile struct {
-	name  string
-	data  []byte
+	name string
+	data []byte
+	// disk is the floppy it was opened on, so that a file written back
+	// after the drive was reselected -- or after the player swapped a
+	// disk -- lands where it came from rather than on whatever is in
+	// the drive now.
+	disk  *Disk
 	dirty bool
 }
 
@@ -229,8 +241,14 @@ func (m *M) dosSetRandom(fcb uint16, rec int) {
 // which is a black screen.
 func (m *M) dosOpen(fcb uint16) *dosFile {
 	name := m.fcbNameAt(fcb)
+	want := m.fcbDisk(fcb)
 	if f, ok := m.files[fcb]; ok {
-		if f.name == name {
+		// The same block naming the same file on the same floppy is
+		// the file that is already open. On a *different* floppy it
+		// is a different file with the same name, which is what an
+		// "insert disk 2" prompt produces -- and answering it from
+		// the cache hands back the disk that was just taken out.
+		if f.name == name && f.disk == want {
 			return f
 		}
 		// Reused for something else: whatever was open in it is
@@ -238,14 +256,14 @@ func (m *M) dosOpen(fcb uint16) *dosFile {
 		m.dosFlush(f)
 		delete(m.files, fcb)
 	}
-	data, ok := m.Disk.Open(name)
+	data, ok := want.Open(name)
 	if !ok {
 		return nil
 	}
 	if m.files == nil {
 		m.files = map[uint16]*dosFile{}
 	}
-	f := &dosFile{name: name, data: data}
+	f := &dosFile{name: name, data: data, disk: want}
 	m.files[fcb] = f
 	return f
 }
@@ -258,7 +276,7 @@ func (m *M) dosCreate(fcb uint16) *dosFile {
 	if f, ok := m.files[fcb]; ok {
 		m.dosFlush(f)
 	}
-	f := &dosFile{name: m.fcbNameAt(fcb), dirty: true}
+	f := &dosFile{name: m.fcbNameAt(fcb), dirty: true, disk: m.fcbDisk(fcb)}
 	m.files[fcb] = f
 	m.dosFillFCB(fcb, f)
 	return f
@@ -323,7 +341,11 @@ func (m *M) dosFlush(f *dosFile) error {
 	if !f.dirty {
 		return nil
 	}
-	if err := m.Disk.Save(f.name, f.data); err != nil {
+	disk := f.disk
+	if disk == nil {
+		disk = m.Disk
+	}
+	if err := disk.Save(f.name, f.data); err != nil {
 		return err
 	}
 	f.dirty = false

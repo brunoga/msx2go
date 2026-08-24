@@ -394,3 +394,27 @@ func (d *Disk) bootProgram() (string, error) {
 		"one BASIC program on it (%s); name the one to run with -run",
 		strings.Join(bas, ", "))
 }
+
+// Label is the floppy's volume label, trimmed, or empty if it has none.
+// It is what a prompt can call one disk of three.
+func (d *Disk) Label() string {
+	for i := 0; ; i++ {
+		e := d.dirent(i)
+		if e == nil || e[0] == 0 {
+			return ""
+		}
+		if e[0] == 0xE5 || e[11]&0x08 == 0 {
+			continue
+		}
+		out := make([]byte, 0, 11)
+		for _, c := range e[:11] {
+			if c >= 0x20 && c < 0x7F {
+				out = append(out, c)
+			}
+		}
+		for len(out) > 0 && out[len(out)-1] == ' ' {
+			out = out[:len(out)-1]
+		}
+		return string(out)
+	}
+}
