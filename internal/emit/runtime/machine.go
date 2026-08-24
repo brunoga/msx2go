@@ -209,6 +209,12 @@ type M struct {
 	// control block it opened each with.
 	files map[uint16]*dosFile
 
+	// ramAlias and ramAliased say which pages currently show the same
+	// mapper segment: the write path mirrors into the other window while
+	// they do. See setRAMSegment.
+	ramAlias   [4]int
+	ramAliased bool
+
 	// searchFor and searchAt carry a directory search between the call
 	// that starts one and the calls that continue it, and searchIn and
 	// searchOn say where it is looking: a search reads the directory the

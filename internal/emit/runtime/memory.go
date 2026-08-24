@@ -170,6 +170,9 @@ func (m *M) wr(a uint16, v byte) {
 		return // cartridge ROM: writes are dropped, as on the real machine
 	}
 	m.Mem[a] = v
+	if m.ramAliased {
+		m.mirror(a, v)
+	}
 	if m.WatchWrites != nil {
 		m.WatchWrites(a, v)
 	}

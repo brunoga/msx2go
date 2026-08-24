@@ -55,16 +55,61 @@ func ramMapperPort(port byte) (page int, ok bool) {
 // setRAMSegment puts a segment in a page, moving the bytes to match: the
 // page's current contents go back to the segment they belong to, and the
 // arriving segment's contents come out of its store.
+//
+// A segment can be in two pages at once, and the hardware makes nothing of
+// it: both windows are the same RAM. Snatcher leans on it -- the disk
+// operating system's way of putting code in page one is to select a segment
+// in page *two*, load into it there, and then select the same segment in
+// page one to run it. Two things follow for a machine built on one flat
+// memory. The arriving segment's bytes must come from wherever it is live
+// -- another page's window, if it is in one -- because its store is stale
+// for as long as it is mapped. And while a segment is in two windows, a
+// write through either must land in both, which is aliasedPages' job: the
+// write path mirrors while the table says so. See wr.
+//
+// Nothing is pushed back out when a page *leaves* a shared segment: the
+// other window has been kept current by the mirroring, and overwriting it
+// here would roll it back. The first cut of this did exactly that, and the
+// boot-time RAM count -- which briefly puts the work area's own segment in
+// page one, stack and all -- was un-run every time page one moved on.
 func (m *M) setRAMSegment(page, seg int) {
 	m.initRAMMapper()
 	seg &= ramSegments - 1
-	if m.ramSeg[page] == seg {
+	old := m.ramSeg[page]
+	if old == seg {
 		return
 	}
 	at := page * ramSegSize
-	copy(m.ramStore[m.ramSeg[page]], m.Mem[at:at+ramSegSize])
-	copy(m.Mem[at:at+ramSegSize], m.ramStore[seg])
+	copy(m.ramStore[old], m.Mem[at:at+ramSegSize])
+	src := m.ramStore[seg][:ramSegSize]
+	for p := 0; p < 4; p++ {
+		if p != page && m.ramSeg[p] == seg {
+			src = m.Mem[p*ramSegSize : (p+1)*ramSegSize]
+			break
+		}
+	}
+	copy(m.Mem[at:at+ramSegSize], src)
 	m.ramSeg[page] = seg
+	m.ramAliased = false
+	for p := 0; p < 4; p++ {
+		m.ramAlias[p] = -1
+		for q := 0; q < 4; q++ {
+			if q != p && m.ramSeg[q] == m.ramSeg[p] {
+				m.ramAlias[p] = q
+				m.ramAliased = true
+				break
+			}
+		}
+	}
+}
+
+// mirror repeats a write into the other window of a doubly-mapped segment.
+// The caller has checked ramAliased, which is false on every machine that
+// has not mapped one segment into two pages.
+func (m *M) mirror(a uint16, v byte) {
+	if p := m.ramAlias[a>>14]; p >= 0 {
+		m.Mem[uint16(p)<<14|a&0x3FFF] = v
+	}
 }
 
 // ramSegmentOf is what reading a mapper register gives: the segment in that

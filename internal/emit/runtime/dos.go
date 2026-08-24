@@ -195,7 +195,7 @@ func (m *M) dos() {
 					break
 				}
 				for j, v := range b {
-					m.Mem[m.dma+uint16(i*len(b)+j)] = v
+					m.wr(m.dma+uint16(i*len(b)+j), v)
 				}
 			} else {
 				b := make([]byte, disk.bps)
@@ -356,7 +356,7 @@ func (m *M) dosRead(fcb uint16, pos int) byte {
 		if pos+i < len(f.data) {
 			v = f.data[pos+i]
 		}
-		m.Mem[m.dma+uint16(i)] = v
+		m.wr(m.dma+uint16(i), v)
 	}
 	return 0
 }
