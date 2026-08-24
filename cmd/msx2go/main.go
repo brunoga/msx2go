@@ -82,7 +82,7 @@ func main() {
 	}
 	if *dsk != "" {
 		if err := disk(*dsk, *name, *out, *modpath, *machine, *runBas,
-			*exploreN); err != nil {
+			*exploreN, *interpretOnly); err != nil {
 			die(err)
 		}
 		return
@@ -237,7 +237,8 @@ func interpreted(rom []byte, info z80.Info, out, modpath string, base uint16) er
 // What the disk *is* comes out of the image, so any disk can be handed over:
 // the geometry from its BIOS parameter block, the boot program from its
 // directory, and the shape of the program from booting it and watching.
-func disk(path, name, out, modpath, machine, runBas string, exploreBudget int) error {
+func disk(path, name, out, modpath, machine, runBas string,
+	exploreBudget int, interpretOnly bool) error {
 	img, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -295,7 +296,7 @@ func disk(path, name, out, modpath, machine, runBas string, exploreBudget int) e
 		// same program. Tracing starts from the interrupt hooks; the
 		// main thread stays interpreted, and sites.txt feeds back
 		// everything a run discovers. See -discover for cartridges.
-		if lo, hi, ok := probe.LoadedRange(); ok {
+		if lo, hi, ok := probe.LoadedRange(); ok && !interpretOnly {
 			snap = append([]byte(nil), probe.Mem[lo:int(hi)+1]...)
 			info.TransBase = lo
 			info.TransSize = len(snap)
