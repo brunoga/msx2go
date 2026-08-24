@@ -510,9 +510,55 @@ func (m Module) data(blocks []z80.Block) ([]byte, error) {
 	for i, blk := range blocks {
 		f("// d%d is %s: %d bytes at %04Xh.",
 			i, blk.Name, len(blk.Data), int(m.Base)+blk.Off)
-		f("const d%d = %s", i, goString(blk.Data))
+		parts := goStringParts(blk.Data)
+		if len(parts) == 1 {
+			f("const d%d = %s", i, parts[0])
+			continue
+		}
+		// Too big for one constant: see goStringParts. The pieces are
+		// joined into the name the block table expects, so nothing
+		// downstream knows the difference.
+		names := make([]string, len(parts))
+		for j, part := range parts {
+			names[j] = fmt.Sprintf("d%d_%d", i, j)
+			f("const %s = %s", names[j], part)
+		}
+		f("const d%d = %s", i, strings.Join(names, " +\n\t"))
 	}
 	return format.Source(b.Bytes())
+}
+
+// goStringParts renders bytes as one or more Go string constants.
+//
+// One would do if Go's parser had no opinion about it. The bytes are written
+// as short quoted runs joined by +, so that no source line is absurd, and a
+// chain of those is a left-nested tree of binary expressions to a parser --
+// one node deep per run. Past a hundred thousand nodes go/format stops with
+// "exceeded max nesting depth" and the whole generation fails, which is what
+// a sixteen-megabyte hard disk did: seven hundred thousand runs in one
+// constant.
+//
+// So the chain is cut into constants of a few thousand runs each and those
+// are joined instead. The nesting is then bounded twice over -- within a
+// constant by the cut, and across them by how few constants there are.
+func goStringParts(b []byte) []string {
+	const per = 24
+	// runsPerConst keeps each chain far below the parser's limit while
+	// leaving few enough constants that joining them is shallow too: a
+	// sixteen-megabyte block comes out as a hundred and seventy of them.
+	const runsPerConst = 4096
+	if len(b) == 0 {
+		return []string{`""`}
+	}
+	var out []string
+	for at := 0; at < len(b); at += per * runsPerConst {
+		end := at + per*runsPerConst
+		if end > len(b) {
+			end = len(b)
+		}
+		out = append(out, goString(b[at:end]))
+	}
+	return out
 }
 
 // goString renders bytes as a Go string constant, split so no line is absurd.
