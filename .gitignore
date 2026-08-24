@@ -1,0 +1,6 @@
+# Build outputs. The three commands build to the repo root when built
+# without -o; generated game modules do not belong in this tree at all.
+/msx2go
+/msxrun
+/vramcmp
+*.exe
