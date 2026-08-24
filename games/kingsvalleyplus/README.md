@@ -116,3 +116,32 @@ pins it, and fails without the check.
 Getting there needed the input format: `-tape` is twelve bytes a frame, one
 per row of the key matrix, and MSX keys are **active low**. A tape of zeros
 holds every key on the keyboard down, which walks the menus on its own.
+
+## Translated, and the two bugs that took
+
+Once a floppy's code could be translated, this game came up blue and stayed
+there -- the first title to exercise the combination of a disk and the
+handler shape, where the game's whole frame lives in the interrupt handler.
+Two bugs in series, neither visible until both were reachable:
+
+**A call to an address with no label lost its return address.** The
+emitter's flat path pushed for every case but that one, so the callee's
+`ret` popped the sentinel and abandoned the caller mid-routine, silently.
+This game's handler calls H.TIMI two instructions in, so every interrupt
+ran two instructions and stopped: the screen never changed. The Python
+emitter this lineage began with had the same hole, which is why the golden
+test now carries it as a documented divergence.
+
+**And then noLabel interpreted the BDOS entry as code.** Page-zero calls
+are routed to shims by the emitter, but a floppy's function-call entry is
+at F37Dh -- in the work area, above that line -- so a translated call
+arrived at noLabel, which ran the work area as instructions: a restart
+vector and a dead machine. noLabel now recognises a shimmed entry, runs
+it, and returns through the stack the way the interpreter's own call and
+jump paths do.
+
+Verified after: video memory and the sound registers identical to the
+interpreter-only twin at every checkpoint over three thousand frames, and
+the game on screen. What differs is six bytes of dead stack below the
+stack pointer, one word out of step -- the two engines leave a different
+amount of litter where nothing reads.
