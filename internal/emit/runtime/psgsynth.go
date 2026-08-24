@@ -69,6 +69,24 @@ func NewSynth(sampleRate int) *Synth {
 	return &Synth{sampleRate: sampleRate, noiseLFSR: 1}
 }
 
+// Prime adopts a register file wholesale: the state the machine is in
+// right now, rather than a write that has just happened.
+//
+// A synthesiser hears *writes*, because a write is an event -- writing
+// register 13 restarts the envelope, and replaying the file every frame
+// would retrigger it sixty times a second. But it has to start from
+// somewhere, and "all zeroes" is not where the machine is: a driver sets
+// the envelope period once during initialisation and never again, so a
+// synthesiser created after boot never learns it. Castle Excellent does
+// exactly that, and its envelope-driven channel decayed in two
+// milliseconds and stayed silent -- one voice of three simply missing.
+//
+// The same hole opens when a snapshot is restored: the machine has
+// register state and no write history at all.
+func (p *Synth) Prime(reg [16]byte) {
+	p.reg = reg
+}
+
 // Write sets a register, exactly as `out (a1h),a` would.
 func (p *Synth) Write(reg, v byte) {
 	if reg > 15 {
@@ -124,9 +142,13 @@ func (p *Synth) step() {
 		p.noiseLFSR = (p.noiseLFSR >> 1) | (bit << 16)
 	}
 
-	// The envelope steps at clock/(256*EP).
+	// The envelope's own step clock is half the tone generator's --
+	// clock/16 against clock/8 -- so a step is EP*16 clocks, which is
+	// EP*2 of these ticks. Waiting EP*32 made it sixteen times too
+	// slow: Castle Excellent's bass held at full volume instead of
+	// decaying, once it could be heard at all.
 	p.envCount++
-	if p.envCount >= p.envPeriod()*32 {
+	if p.envCount >= p.envPeriod()*2 {
 		p.envCount = 0
 		p.envAdvance()
 	}

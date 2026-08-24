@@ -903,6 +903,7 @@ func main() {
 	var pcm []int16
 	if *wav != "" {
 		synth = z80.NewSynth(wavRate)
+		m.PSG.Log = true
 		m.SCC.SetSampleRate(wavRate)
 	}
 	err = m.InterpretRun(uint16(*base), *frames, *quota, func(f int) {

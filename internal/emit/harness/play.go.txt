@@ -311,6 +311,9 @@ func (g *game) load() {
 		fmt.Fprintln(os.Stderr, "__NAME__: restore:", err)
 		return
 	}
+	// The restored machine has register state and no write history, so
+	// the synthesiser has to adopt the chip wholesale. See Synth.Prime.
+	g.snd.prime(&g.m.PSG)
 	fmt.Fprintln(os.Stderr, "__NAME__: restored from "+g.state)
 }
 
@@ -406,8 +409,12 @@ func newSound(m *z80.M, perFrame int) *sound {
 	if perFrame < 1 {
 		perFrame = 1
 	}
-	return &sound{synth: z80.NewSynth(sampleRate), scc: &m.SCC,
-		perFrame: perFrame}
+	sy := z80.NewSynth(sampleRate)
+	// Whatever the boot left in the chip: the writes from before this
+	// moment are not in the log, and a driver sets some registers only
+	// once. See Synth.Prime.
+	sy.Prime(m.PSG.Reg)
+	return &sound{synth: sy, scc: &m.SCC, perFrame: perFrame}
 }
 
 // frame hands the synthesiser the writes the driver actually made, in order,
@@ -422,6 +429,15 @@ func newSound(m *z80.M, perFrame int) *sound {
 //
 // A write is an event, not a state. The machine records them in order and
 // this drains them.
+// prime adopts the chip's registers, for a machine that has just been
+// restored from a snapshot.
+func (s *sound) prime(p *z80.PSG) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p.TakeWrites()
+	s.synth.Prime(p.Reg)
+}
+
 func (s *sound) frame(p *z80.PSG) {
 	w := p.TakeWrites()
 	s.mu.Lock()
