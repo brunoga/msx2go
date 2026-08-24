@@ -79,8 +79,15 @@ func (m *M) dos() {
 		// the segment count the kernel keeps. Answering one sends a
 		// program down the path for a machine without them, and
 		// Snatcher's loader says so and stops.
-		m.B = 2
-		m.A = 0
+		// Measured on the reference machine, which answers A=0, B=2,
+		// C=31h, D=0, E=0: kernel version 2.31, and no version for
+		// the system file. The whole reply matters, not just B. A
+		// program deciding whether the extended calls are there reads
+		// further than the major version, and a machine that set B
+		// and left the rest holding whatever the caller had put there
+		// answered "two point whatever happened to be in C".
+		m.A, m.B, m.C = 0, 2, 0x31
+		m.setDE(0)
 	case 0x0C: // return the version
 		m.setHL(0x0022)
 		m.A = 0
