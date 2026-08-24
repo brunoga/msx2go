@@ -22,8 +22,14 @@ import (
 
 // Screen dimensions of the active display area.
 const (
-	ScreenWidth  = 256
-	ScreenHeight = 192
+	ScreenWidth = 256
+	// ScreenWidthWide is what the V9938's two wide modes put on a line.
+	// SCREEN 6 and SCREEN 7 are 512 dots across, and a picture taken from
+	// them 256 wide is the left half of the screen: Snatcher's menu drawn
+	// that way is legible glyphs in the wrong places, which reads like a
+	// blitter fault rather than a missing mode.
+	ScreenWidthWide = 512
+	ScreenHeight    = 192
 	// ScreenHeightTall is what a V9938 shows when register 9 asks for 212.
 	ScreenHeightTall = 212
 
@@ -78,10 +84,17 @@ type RenderOptions struct {
 
 // Renderer holds the output buffer so frames do not allocate.
 type Renderer struct {
-	// tall is the buffer for a 212-line screen, cur the one in use.
-	tall  *image.RGBA
-	cur   *image.RGBA
-	lines int
+	// tall is the buffer for a 212-line screen, wide and wideTall the
+	// same two for a 512-dot mode, and cur the one in use. They are kept
+	// apart rather than one buffer resized because every comparison in
+	// this project is against an image of a fixed size, and a renderer
+	// that reallocated would move them all.
+	tall     *image.RGBA
+	wide     *image.RGBA
+	wideTall *image.RGBA
+	cur      *image.RGBA
+	lines    int
+	width    int
 
 	RenderOptions
 	img *image.RGBA
@@ -92,8 +105,10 @@ type Renderer struct {
 
 func NewRenderer() *Renderer {
 	return &Renderer{
-		img:  image.NewRGBA(image.Rect(0, 0, ScreenWidth, ScreenHeight)),
-		tall: image.NewRGBA(image.Rect(0, 0, ScreenWidth, ScreenHeightTall)),
+		img:      image.NewRGBA(image.Rect(0, 0, ScreenWidth, ScreenHeight)),
+		tall:     image.NewRGBA(image.Rect(0, 0, ScreenWidth, ScreenHeightTall)),
+		wide:     image.NewRGBA(image.Rect(0, 0, ScreenWidthWide, ScreenHeight)),
+		wideTall: image.NewRGBA(image.Rect(0, 0, ScreenWidthWide, ScreenHeightTall)),
 	}
 }
 
@@ -112,12 +127,33 @@ func (r *Renderer) Lines() int {
 // The 192-line buffer is kept separate and returned unchanged for anything
 // that asks for 192, because every MSX1 comparison in this project is of a
 // 256x192 image and none of them should move.
-func (r *Renderer) use(lines int) {
-	if lines > ScreenHeight {
-		r.cur, r.lines = r.tall, ScreenHeightTall
-	} else {
-		r.cur, r.lines = r.img, ScreenHeight
+func (r *Renderer) use(lines, dots int) {
+	tall := lines > ScreenHeight
+	r.lines, r.width = ScreenHeight, ScreenWidth
+	if tall {
+		r.lines = ScreenHeightTall
 	}
+	if dots > ScreenWidth {
+		r.width = ScreenWidthWide
+		r.cur = r.wide
+		if tall {
+			r.cur = r.wideTall
+		}
+		return
+	}
+	r.cur = r.img
+	if tall {
+		r.cur = r.tall
+	}
+}
+
+// Width is how wide the last rendered image is: 512 in the modes that are
+// 512 dots across, 256 in every other.
+func (r *Renderer) Width() int {
+	if r.width == 0 {
+		return ScreenWidth
+	}
+	return r.width
 }
 
 // Layout describes where the VDP tables live, decoded from the registers.
@@ -198,7 +234,7 @@ func (r *Renderer) scanlines(v *VDP) *image.RGBA {
 	defer func() { v.Reg = saved }()
 
 	lines := v.Lines()
-	r.use(lines)
+	r.use(lines, v.dotsPerLine())
 	regs := v.RegsAt(0)
 	next := 0
 	for y := 0; y < r.lines; y++ {
@@ -219,7 +255,7 @@ func (r *Renderer) scanlines(v *VDP) *image.RGBA {
 		// write the new set, and those lines are backdrop on the
 		// hardware too.
 		if y >= lines || regs[1]&0x40 == 0 {
-			for x := 0; x < ScreenWidth; x++ {
+			for x := 0; x < r.width; x++ {
 				r.set(x, y, back)
 			}
 			continue
@@ -264,7 +300,7 @@ func (r *Renderer) tileLine(v *VDP, y int, pal [16]color.RGBA, zero, edge color.
 	sy := (y + int(regs[23])) & 0xFF
 	row, fy := sy/8, sy%8
 	third := (row / 8) & 3
-	var lineBuf [ScreenWidth]color.RGBA
+	var lineBuf [ScreenWidthWide]color.RGBA
 	for col := 0; col < 32; col++ {
 		ch := int(v.VRAM[(name+(row&31)*32+col)&mask])
 		idx := third*0x800 + ch*8 + fy
@@ -303,18 +339,18 @@ func (r *Renderer) bitmapLine(v *VDP, y int, pal [16]color.RGBA, zero, edge colo
 	// so ignoring it does not show a stationary picture -- it shows
 	// whatever else happens to be in memory.
 	sy := (y + int(v.Reg[23])) & 0xFF
-	var lineBuf [ScreenWidth]color.RGBA
+	var lineBuf [ScreenWidthWide]color.RGBA
 	if v.Mode() == ModeGraphic7 {
 		// Screen 8 has no palette: the byte is the colour, three bits
 		// of green, three of red, two of blue, scaled the way the
 		// chip's DAC steps.
-		for x := 0; x < ScreenWidth; x++ {
+		for x := 0; x < r.width; x++ {
 			lineBuf[x] = grb332(v.VRAM[v.phys(base+sy*bpl+x)])
 		}
 		r.adjusted(y, lineBuf[:], int(v.Reg[18]&0x0F^8)-8, edge)
 		return
 	}
-	for x := 0; x < ScreenWidth; x++ {
+	for x := 0; x < r.width; x++ {
 		c := back
 		a := v.phys(base + sy*bpl + x/ppb)
 		sh := uint(ppb-1-(x%ppb)) * bits
@@ -334,9 +370,9 @@ func (r *Renderer) bitmapLine(v *VDP, y int, pal [16]color.RGBA, zero, edge colo
 // backdrop, which is not the same colour as a transparent pixel once
 // register 8 says colour 0 is opaque.
 func (r *Renderer) adjusted(y int, lineBuf []color.RGBA, adj int, edge color.RGBA) {
-	for x := 0; x < ScreenWidth; x++ {
+	for x := 0; x < r.width; x++ {
 		sx := x + adj
-		if sx < 0 || sx >= ScreenWidth {
+		if sx < 0 || sx >= r.width {
 			r.set(x, y, edge)
 		} else {
 			r.set(x, y, lineBuf[sx])
@@ -389,6 +425,7 @@ func (r *Renderer) spriteLine(v *VDP, y int, pal [16]color.RGBA) {
 	attr := int(v.Reg[5]&0xFC)<<7 | int(v.Reg[11]&0x03)<<15
 	patt := int(v.Reg[6]&0x3F) << 11
 	colTab := attr - 512
+	dot := r.width / ScreenWidth
 	size, scale := 8, 1
 	if v.Reg[1]&0x02 != 0 {
 		size = 16
@@ -483,8 +520,14 @@ func (r *Renderer) spriteLine(v *VDP, y int, pal [16]color.RGBA) {
 			if v.VRAM[v.phys(byteAt)]&(0x80>>uint(cx%8)) == 0 {
 				continue
 			}
-			if px := x0 + dx; px >= 0 && px < ScreenWidth {
-				r.set(px, y, pal[col])
+			// The sprite plane stays on a 256-dot grid in the
+			// wide modes: the chip places sprites by the same
+			// coordinates whatever the bitmap's resolution, and
+			// each sprite dot covers two screen dots.
+			for i := 0; i < dot; i++ {
+				if px := (x0+dx)*dot + i; px >= 0 && px < r.width {
+					r.set(px, y, pal[col])
+				}
 			}
 		}
 	}
@@ -493,8 +536,8 @@ func (r *Renderer) spriteLine(v *VDP, y int, pal [16]color.RGBA) {
 // Render draws one frame from VRAM and returns the buffer. The buffer is
 // reused between calls.
 func (r *Renderer) Render(vram []byte, reg []byte) *image.RGBA {
-	// The MSX1 path is always 192 lines, unchanged.
-	r.use(ScreenHeight)
+	// The MSX1 path is always 192 lines and 256 dots, unchanged.
+	r.use(ScreenHeight, ScreenWidth)
 	l := DecodeLayout(reg)
 
 	backdrop := Palette[l.Backdrop]
@@ -656,9 +699,9 @@ func (r *Renderer) drawSprites(vram []byte, l VDPLayout) {
 
 func (r *Renderer) set(x, y int, c color.RGBA) {
 	if r.cur == nil {
-		r.use(ScreenHeight)
+		r.use(ScreenHeight, ScreenWidth)
 	}
-	if x < 0 || x >= ScreenWidth || y < 0 || y >= r.lines {
+	if x < 0 || x >= r.width || y < 0 || y >= r.lines {
 		return
 	}
 	i := y*r.cur.Stride + x*4
