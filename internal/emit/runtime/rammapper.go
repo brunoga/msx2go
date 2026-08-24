@@ -90,6 +90,16 @@ func (m *M) setRAMSegment(page, seg int) {
 	}
 	copy(m.Mem[at:at+ramSegSize], src)
 	m.ramSeg[page] = seg
+	m.recomputeAliases()
+}
+
+// recomputeAliases refreshes the table the write path mirrors through: which
+// other page, if any, is showing the same segment as each page.
+//
+// It is derived from ramSeg and nothing else, so a machine restored from a
+// snapshot rebuilds it rather than carrying it -- and must rebuild it, because
+// the zero value of the table names page zero rather than "no other page".
+func (m *M) recomputeAliases() {
 	m.ramAliased = false
 	for p := 0; p < 4; p++ {
 		m.ramAlias[p] = -1

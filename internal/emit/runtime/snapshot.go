@@ -171,6 +171,28 @@ func (m *M) walk(s snapper) {
 	for i := range m.ramSeg {
 		s.int(&m.ramSeg[i])
 	}
+	if s.reading() {
+		// Which pages share a segment is derived from the above; see
+		// recomputeAliases for why it cannot simply be left alone.
+		m.recomputeAliases()
+	}
+
+	// Page zero as the BIOS has it, which is a different memory from the
+	// one the processor reads through page zero while a disk program owns
+	// it. Nothing puts it back after a restore -- it is taken when the
+	// system bytes are laid down, and a snapshot skips that -- so it
+	// travels with the machine.
+	nbios := len(m.bios0)
+	s.int(&nbios)
+	if s.reading() && len(m.bios0) != nbios {
+		m.bios0 = nil
+		if nbios > 0 {
+			m.bios0 = make([]byte, nbios)
+		}
+	}
+	if nbios > 0 {
+		s.bytes(m.bios0)
+	}
 
 	s.bytes(m.PSG.Reg[:])
 

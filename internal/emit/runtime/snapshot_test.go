@@ -115,9 +115,18 @@ func TestSnapshotRejectsAnotherCartridge(t *testing.T) {
 //     changed. Its written sectors are saved beside it, not in a snapshot,
 //     and dma, files, searchFor and searchAt go with it -- and so does
 //     images, the floppies the machine was handed. Which of them is in
-//     which drive *is* state, so inDrive and curDrive are saved.
+//     which drive *is* state, so inDrive and curDrive are saved. searchIn
+//     and searchOn go with Disk for the same reason searchFor and searchAt
+//     do: they are where one directory search had got to; and
+//   - ramAlias and ramAliased, which say which pages are showing the same
+//     mapper segment. They are derived from ramSeg, which *is* saved, and
+//     are rebuilt on the way in -- see recomputeAliases, and note that
+//     their zero value is wrong rather than merely stale.
+//
+// bios0 is saved: it is page zero as the BIOS has it, taken once when the
+// system bytes are laid down, and a restore does not lay them down again.
 func TestSnapshotCoversTheMachine(t *testing.T) {
-	const known = 105
+	const known = 110
 	if n := reflect.TypeOf(M{}).NumField(); n != known {
 		t.Errorf("M has %d fields, this test was written against %d. "+
 			"A new one may need adding to walk in snapshot.go.", n, known)
