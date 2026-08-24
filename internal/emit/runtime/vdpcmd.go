@@ -360,10 +360,30 @@ func (v *VDP) busy(kind byte, nx, ny, nxB int) {
 	v.busyUntil = v.Cycles() + uint64(accesses*cyclesPerAccess)
 }
 
-// Busy reports whether the command engine is still working.
+// Busy reports whether the command engine is still working: a command
+// still costing its accesses, or a transfer through the processor that
+// has not had all its bytes yet. Status register 2's low bit is this,
+// and a program that starts a command waits on it before starting
+// another.
 func (v *VDP) Busy() bool {
+	// A transfer through the processor counts: the command is running
+	// until the last byte has been handed over. That is not pedantry
+	// -- a program feeding one watches this bit to know when to stop,
+	// and a chip that says "finished" straight away is told to stop
+	// before it has sent a single byte, which draws nothing at all.
+	if v.xfer != xferNone {
+		return true
+	}
 	return v.Cycles != nil && v.Cycles() < v.busyUntil
 }
+
+// TransferReady reports whether the command engine wants the next byte,
+// which is status register 2's top bit. A transfer here moves a byte the
+// moment it is given one, so the answer is simply whether a transfer is
+// running -- and a program feeding one waits on this bit between bytes,
+// which is why a chip that never sets it is a program that never
+// finishes its first blit.
+func (v *VDP) TransferReady() bool { return v.xfer != xferNone }
 
 // line draws the V9938's line, which is a Bresenham walk with the long axis
 // chosen by the argument register's MAJ bit.

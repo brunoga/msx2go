@@ -185,6 +185,14 @@ func (m *M) status2() byte {
 	if inLine < perLine/4 {
 		s |= 0x20
 	}
+	// The command engine's two flags: still working, and wants the next
+	// byte. See VDP.Busy and VDP.TransferReady.
+	if m.VDP.Busy() {
+		s |= 0x01
+	}
+	if m.VDP.TransferReady() {
+		s |= 0x80
+	}
 	return s
 }
 
