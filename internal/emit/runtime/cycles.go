@@ -492,6 +492,33 @@ func (m *M) dueIRQ() {
 		return
 	}
 	m.lastIRQ += budget
+	if m.hasRAMMapper() && m.Cyc-m.lastIRQ >= budget {
+		// More than one frame's worth of cycles has gone by since this
+		// interrupt came due, so the ones in between did not happen.
+		// The clock does not owe them: a vertical blank is a moment,
+		// and a processor that was busy through several has missed
+		// several, not earned a burst.
+		//
+		// Paying the debt back is what the accumulating form does, and
+		// it delivers them as fast as the check runs -- one every few
+		// thousand cycles instead of one every sixty thousand. A game
+		// that waits on a counter its handler increments then races
+		// itself: Snatcher's opening waits for exactly sixty-four, and
+		// with interrupts arriving eight times too often the counter
+		// stepped past sixty-four between the load and the compare,
+		// every time, deterministically. It waited for ever, two
+		// instructions from finishing.
+		//
+		// Disk machines only, which is where this was measured. Every
+		// cartridge timing in this project was checked against the
+		// reference machine with the debt being paid back -- Space
+		// Manbow's loading phase and Castle Excellent's whole first
+		// minute among them -- and those measurements stand until the
+		// same check can be made for them. The physical argument says
+		// a cartridge should have this too; the measurements have not
+		// been redone, so it does not get it yet.
+		m.lastIRQ = m.Cyc
+	}
 	m.lastDeliver = m.Cyc
 	if !m.booting {
 		// During INIT the interrupts are not frames anyone is counting;
