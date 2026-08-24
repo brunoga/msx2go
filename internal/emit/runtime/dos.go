@@ -551,8 +551,35 @@ func (m *M) diskBoot() {
 	if m.Mem[hStkE] != 0xC3 {
 		return
 	}
+	m.biosPageZero()
 	m.setHL(m.rd16(basicTop))
 	m.run(m.rd16(hStkE + 1))
+}
+
+// biosPageZero puts the BIOS back into page zero, which is the state this
+// entry leaves the machine in: BASIC runs with the BIOS below it, and a
+// program that arrives through the stack-end hook arrives into that machine
+// rather than into the one the disk operating system had.
+//
+// It matters for more than the shims. Page zero is where the BIOS keeps the
+// two bytes naming the VDP's ports, and a program that has stopped being a
+// disk program reads them from there directly rather than through a slot,
+// because by then they are simply in front of it. Under the operating system
+// those same two addresses are the operand of the kernel's own entry: leave
+// them and the program takes the low half of a work-area address for a pair
+// of port numbers and talks to ports that do not exist. Snatcher does, and
+// then waits forever for a command engine it cannot hear to go quiet.
+//
+// The switch is one way. Nothing here goes back to being a disk program, and
+// a machine that modelled the return would need page zero's RAM kept whole
+// underneath, which nothing has asked for.
+func (m *M) biosPageZero() {
+	if m.bios0 == nil {
+		return
+	}
+	copy(m.Mem[:0x4000], m.bios0)
+	m.PrimarySlot &^= 3
+	m.dosProgram = false
 }
 
 func (m *M) diskROM(a uint16) {
