@@ -186,11 +186,14 @@ func (m *M) bios(addr uint16) {
 		m.setDE(src + n)
 		m.B, m.C, m.A = 0, VDPDataPort, 0
 
-	case dskIO, dskChg, getDPB, choice, dskFmt, mtOff:
+	case dskIO, dskChg, getDPB, choice, dskFmt, mtOff, dskBoot:
 		// The disk ROM's raw sector calls. See diskROM.
 		m.diskROM(addr)
 	case dosBDOS, 0x0005: // the disk function call, from BASIC or from DOS
 		m.dos()
+
+	case 0x0038: // the interrupt entry, with no hook of the program's own
+		m.biosInterrupt()
 
 	case 0x005F: // CHGMOD  set up the screen mode in A
 		// This did nothing, on the reasoning that a cartridge sets
@@ -739,4 +742,37 @@ func (m *M) InstallSystemBytes() {
 		m.Mem[RG8SAV+1] = 0x02
 		m.VDP.Reg[9] |= 0x02
 	}
+}
+
+// jiffy is the BIOS's frame counter. Its interrupt handler advances it once
+// per interrupt and programs read it to time themselves.
+const jiffy = 0xFC9E
+
+// biosInterrupt is the BIOS's own interrupt handler, reached when an
+// interrupt arrives and the program has installed no hook for deliver to run
+// in its place.
+//
+// A cartridge always installs one, so nothing needed this until a program
+// running under the disk operating system put the BIOS back into page zero --
+// which is what Snatcher's loader does before starting the game, because from
+// then on it wants to be an ordinary MSX program again -- and let the
+// interrupt it had just enabled arrive. Page zero was the BIOS once more, so
+// 0038h was a BIOS entry, and it was one with no shim behind it.
+//
+// Two things it does are visible from outside. It reads status register zero,
+// which is what acknowledges the interrupt the chip is asking for, and it
+// advances the frame counter. The hooks it would call after that are the ones
+// deliver runs instead of this when the program has installed any.
+//
+// The read is of register zero specifically. The hardware reads whichever
+// register 15 selects and a program is expected to leave that at zero for
+// exactly this reason; a machine that inherited a program's own selection
+// here would answer the acknowledgement out of the wrong register and leave
+// the interrupt standing.
+func (m *M) biosInterrupt() {
+	was := m.VDP.Reg[15]
+	m.VDP.Reg[15] = 0
+	m.VDP.ReadStatus()
+	m.VDP.Reg[15] = was
+	m.wr16(jiffy, m.rd16(jiffy)+1)
 }

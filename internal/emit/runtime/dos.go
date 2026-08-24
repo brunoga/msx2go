@@ -31,7 +31,8 @@ const (
 	choice  = 0x4019 // the format menu, which there is none of here
 	dskFmt  = 0x401C // format a disk
 	mtOff   = 0x401F // stop the motor
-	dskLast = 0x4022 // one past the table
+	dskBoot = 0x4022 // start the disk system, and BASIC after it
+	dskLast = 0x4025 // one past the table
 )
 
 // FCB layout, as MSX-DOS defines it. Only the fields a program is entitled to
@@ -524,8 +525,40 @@ func trimSpaces(s string) string {
 // the bytes go, with carry set for a write. Coming back, carry clear is
 // success and B says how many sectors moved; carry set puts an error code
 // in A.
+// hStkE is the hook BASIC calls while it lays out its stack. Measured in the
+// reference machine's BIOS at 62F0h, where the call sits one instruction
+// before `ld sp,hl`.
+const hStkE = 0xFEDA
+
+// basicTop is where BASIC keeps the top of the memory it will use, which is
+// what it hands the stack-end hook in HL.
+const basicTop = 0xF674
+
+// diskBoot is the disk ROM's last jump-table entry: start the disk system.
+//
+// On the hardware it lays out the disk work area and goes on into BASIC's
+// initialisation, and partway through that BASIC calls the stack-end hook.
+// That is not a detail -- it is how a program hands the machine over without
+// being a cartridge. Snatcher's loader points the hook at its own code, calls
+// this entry through the disk ROM's slot, and follows the call with a jump to
+// the reset vector, which says plainly that it does not expect to come back.
+//
+// So what this does is the part the caller depends on: run the hook, with HL
+// holding what BASIC would have put there. There is no BASIC underneath to
+// return into, and a program that hooks the stack end is not planning to let
+// one run.
+func (m *M) diskBoot() {
+	if m.Mem[hStkE] != 0xC3 {
+		return
+	}
+	m.setHL(m.rd16(basicTop))
+	m.run(m.rd16(hStkE + 1))
+}
+
 func (m *M) diskROM(a uint16) {
 	switch a {
+	case dskBoot:
+		m.diskBoot()
 	case dskIO:
 		write := m.Fc
 		drive, want := int(m.A), int(m.B)
