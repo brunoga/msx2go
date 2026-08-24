@@ -178,7 +178,16 @@ func (c Ctx) callTo(target, ret uint16) string {
 			return fmt.Sprintf("{ m.push(0x%04x); goto L%04x }",
 				ret, target)
 		}
-		return c.noLabel(target)
+		// A call whose target has no label still *is* a call: the
+		// return address goes on the stack before the interpreter
+		// takes over, or the callee's ret pops whatever lies beneath
+		// -- the sentinel -- and the caller is abandoned mid-routine
+		// with no sign that anything went wrong. King's Valley Plus
+		// calls H.TIMI two instructions into its interrupt handler,
+		// so its whole frame vanished and the screen never changed.
+		// Every other branch here pushes; this one forgot.
+		return fmt.Sprintf("{ m.push(0x%04x); %s }", ret,
+			c.noLabel(target))
 	}
 	if off, ok := c.Offsets(target); ok {
 		return fmt.Sprintf("{ m.push(0x%04x); goto L%05x }", ret, off)

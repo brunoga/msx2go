@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -109,6 +110,13 @@ func (m *M) RunAt(entry uint16) {
 		return
 	}
 `), nil, 1)
+	// And a third: a call whose target has no label now pushes its
+	// return address before handing the target to the interpreter. The
+	// Python emitter did not, so the callee's ret popped the sentinel
+	// and abandoned the caller -- which King's Valley Plus's interrupt
+	// handler does on every frame, two instructions in. Collapse the
+	// new form back to the old one so the rest stays byte-equal.
+	gotBody = callPush.ReplaceAll(gotBody, []byte("$1$2"))
 	wantBody := afterPackage(want)
 	if bytes.Equal(gotBody, wantBody) {
 		return
@@ -144,3 +152,8 @@ func afterPackage(b []byte) []byte {
 	}
 	return b
 }
+
+// callPush matches the pushed-return-address form of a call to an
+// address with no label. See the third deliberate exception above.
+var callPush = regexp.MustCompile(
+	`(?m)^(\t+)\{\n\t+m\.push\(0x[0-9a-f]+\)\n\t+(m\.noLabel\(0x[0-9a-f]+\))\n\t+\}$`)

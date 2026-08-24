@@ -82,6 +82,22 @@ func (m *M) runFrom(entry uint16, mark uint16) {
 // symptom -- and while msx2go is being taught a new cartridge, that report is
 // worth more than a game that limps.
 func (m *M) noLabel(a uint16) {
+	if m.isBIOS(a) {
+		// Not an untranslated address at all: a shimmed entry the
+		// translation cannot contain, because it is Go rather than
+		// image bytes. Page zero is caught by the emitter, but a
+		// disk's BDOS entry lives at F37Dh -- in the work area, above
+		// the line the emitter draws -- so a translated `call F37Dh`
+		// arrives here. Run the shim and return through the stack,
+		// exactly as the interpreter's own call and jump paths do.
+		// Interpreting from F37Dh instead executes the work area as
+		// code, which is a restart vector and a dead machine.
+		m.bios(a)
+		m.PC = m.pop()
+		m.idle, m.halted = false, false
+		m.Interpret(m.runMark, maxInterpSteps)
+		panic(runFinished{})
+	}
 	if !m.Fussy {
 		m.fellBack(a)
 		m.PC = a
