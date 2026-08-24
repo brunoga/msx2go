@@ -576,6 +576,19 @@ func (m *M) deliver(entry uint16) {
 	// "an interrupt that never happened".
 	limit := m.cycLimit
 	m.cycLimit = 0
+	// On a disk machine the hooks are reached through the BIOS's own
+	// interrupt handler, and two things it does before any hook are part
+	// of the machine: it reads status register zero, which acknowledges
+	// the interrupt, and it advances the frame counter at FC9Eh.
+	// Snatcher's intro paces itself on that counter -- its engine ticked
+	// on a machine where nothing counted frames, so its script never
+	// moved and the screen stayed on the first scene. Cartridge machines
+	// are left as they were: the counter is measurable there too, but
+	// every digest in this project's history was taken without it, and
+	// none of those games reads it.
+	if m.hasRAMMapper() {
+		m.biosInterrupt()
+	}
 	for _, h := range hooks {
 		m.runFrom(h, frameSP)
 		if m.SP > frameSP {

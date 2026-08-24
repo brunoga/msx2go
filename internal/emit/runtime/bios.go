@@ -744,6 +744,13 @@ func (m *M) InstallSystemBytes() {
 	}
 }
 
+// oldKey and newKey are the BIOS's keyboard tables: the matrix as the
+// interrupt handler last read it, and the read before that.
+const (
+	oldKey = 0xFBDA
+	newKey = 0xFBE5
+)
+
 // jiffy is the BIOS's frame counter. Its interrupt handler advances it once
 // per interrupt and programs read it to time themselves.
 const jiffy = 0xFC9E
@@ -775,4 +782,14 @@ func (m *M) biosInterrupt() {
 	m.VDP.ReadStatus()
 	m.VDP.Reg[15] = was
 	m.wr16(jiffy, m.rd16(jiffy)+1)
+	// The keyboard scan: the handler reads the matrix into NEWKEY, with
+	// the previous state moved to OLDKEY first. A program reads these
+	// tables rather than the hardware, and the tables are active-low the
+	// way the matrix is -- cleared RAM reads as every key on the keyboard
+	// held down at once, and a program waiting for the machine's keys to
+	// come up waits for the rest of its life.
+	for i := 0; i < 11; i++ {
+		m.Mem[oldKey+uint16(i)] = m.Mem[newKey+uint16(i)]
+		m.Mem[newKey+uint16(i)] = m.Keys[i]
+	}
 }
