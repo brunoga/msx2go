@@ -65,6 +65,7 @@ func (m *M) Insert(drive, image int) bool {
 		// with: write back anything it changed while it still has a
 		// disk to be written to. Its own disk, not the new one.
 		m.flushOpenFiles()
+		m.diskSwapped = true
 	}
 	m.inDrive[drive] = image
 	m.syncDisk()

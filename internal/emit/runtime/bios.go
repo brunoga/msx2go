@@ -186,6 +186,9 @@ func (m *M) bios(addr uint16) {
 		m.setDE(src + n)
 		m.B, m.C, m.A = 0, VDPDataPort, 0
 
+	case dskIO, dskChg, getDPB, choice, dskFmt, mtOff:
+		// The disk ROM's raw sector calls. See diskROM.
+		m.diskROM(addr)
 	case dosBDOS, 0x0005: // the disk function call, from BASIC or from DOS
 		m.dos()
 

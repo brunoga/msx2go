@@ -113,6 +113,9 @@ func (m *M) walk(s snapper) {
 		// again. See Boot.
 		&m.MainThread,
 		&m.transStale,
+		// A swap the disk ROM has not been told about yet is state:
+		// restoring must still let the game notice the floppy moved.
+		&m.diskSwapped,
 	} {
 		s.bool(p)
 	}

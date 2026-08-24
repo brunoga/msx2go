@@ -357,6 +357,13 @@ func (m *M) jumpTo(target uint16) {
 }
 
 func (m *M) isBIOS(a uint16) bool {
+	if m.Disk != nil && len(m.mem.rom) == 0 &&
+		a >= dskIO && a < dskLast && (a-dskIO)%3 == 0 {
+		// The disk ROM's jump table, which lives in page one. A disk
+		// machine has no cartridge there, so nothing else can own
+		// these addresses; a cartridge machine never reaches here.
+		return true
+	}
 	if m.Disk != nil && a == dosBDOS {
 		// Disk BASIC's function-call entry point lives in the work
 		// area, above the ROM, so it needs naming rather than a range.

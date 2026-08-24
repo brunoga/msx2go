@@ -158,6 +158,9 @@ type M struct {
 	images   []*Disk
 	inDrive  []int
 	curDrive int
+	// diskSwapped is set when a floppy is changed, for the disk ROM's
+	// "has the disk been swapped" call to report once. See diskROM.
+	diskSwapped bool
 
 	// dma is where the disk function calls read to and write from, which
 	// a program sets with function 1Ah. MSX-DOS starts it at 0080h.

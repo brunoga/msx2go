@@ -19,6 +19,21 @@ import "fmt"
 // place through the BIOS shim.
 const dosBDOS = 0xF37D
 
+// The disk ROM's own jump table, in page one. A disk that carries a
+// filesystem is read through the function calls at F37Dh above; a game
+// that formatted its floppies its own way reads raw sectors through
+// these, because there is no filesystem for the function calls to work
+// on. Snatcher calls exactly one of them.
+const (
+	dskIO   = 0x4010 // read or write sectors
+	dskChg  = 0x4013 // has the floppy been swapped
+	getDPB  = 0x4016 // describe the disk's geometry
+	choice  = 0x4019 // the format menu, which there is none of here
+	dskFmt  = 0x401C // format a disk
+	mtOff   = 0x401F // stop the motor
+	dskLast = 0x4022 // one past the table
+)
+
 // FCB layout, as MSX-DOS defines it. Only the fields a program is entitled to
 // see are touched; the rest is ours to use for the open file's identity.
 const (
@@ -472,4 +487,79 @@ func trimSpaces(s string) string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+// diskROM is the disk ROM's jump table: raw sector access, for a floppy
+// with no filesystem on it.
+//
+// The register conventions are the published ones, and were measured on
+// the reference machine before being written down: A is the drive, B how
+// many sectors, C the media descriptor, DE the first sector and HL where
+// the bytes go, with carry set for a write. Coming back, carry clear is
+// success and B says how many sectors moved; carry set puts an error code
+// in A.
+func (m *M) diskROM(a uint16) {
+	switch a {
+	case dskIO:
+		write := m.Fc
+		drive, want := int(m.A), int(m.B)
+		sec := int(m.DE())
+		at := m.HL()
+		disk := m.Disk
+		if d := m.DriveDisk(drive); d != nil {
+			disk = d
+		}
+		done := 0
+		for ; done < want; done++ {
+			if write {
+				b := make([]byte, disk.bps)
+				for i := range b {
+					b[i] = m.rd(at + uint16(done*disk.bps+i))
+				}
+				if !disk.WriteSector(sec+done, b) {
+					break
+				}
+				continue
+			}
+			b := disk.ReadSector(sec + done)
+			if b == nil {
+				break
+			}
+			for i, v := range b {
+				m.wr(at+uint16(done*disk.bps+i), v)
+			}
+		}
+		m.tick(uint32(done*disk.bps) * cycVRAMByte)
+		m.B = byte(done)
+		if done < want {
+			// "Not ready", which is what a drive says about a
+			// sector that is not there.
+			m.A, m.Fc = 2, true
+			return
+		}
+		m.A, m.Fc = 0, false
+	case dskChg:
+		// The floppy has not been swapped since the last call unless
+		// somebody swapped it, which Insert records. One says
+		// unchanged, minus one changed.
+		m.B = 1
+		if m.diskSwapped {
+			m.B, m.diskSwapped = 0xFF, false
+		}
+		m.A, m.Fc = 0, false
+	case getDPB:
+		// The drive parameter block, built from the floppy's own boot
+		// sector. A disk with no filesystem has nothing to describe,
+		// so this reports failure rather than inventing a geometry.
+		m.A, m.Fc = 12, true
+	case choice:
+		// No format menu: a machine with one floppy shape has no
+		// choice to offer.
+		m.setHL(0)
+		m.A, m.Fc = 0, false
+	case dskFmt:
+		m.A, m.Fc = 16, true // write protected: nothing formats here
+	case mtOff:
+		m.A, m.Fc = 0, false
+	}
 }

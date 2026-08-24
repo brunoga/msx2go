@@ -56,6 +56,13 @@ func (m *M) BootDisk(d *Disk, start string) error {
 	if start == "" {
 		var err error
 		if start, err = d.bootProgram(); err != nil {
+			// No BASIC program to run, and on a floppy like
+			// Snatcher's no filesystem to look for one in: the
+			// disk carries its own boot code instead. See
+			// bootSector.
+			if sec := d.ReadSector(0); sec != nil && bootable(sec) {
+				return m.bootSector(d)
+			}
 			return err
 		}
 	}
@@ -1102,4 +1109,60 @@ func tokenName(c, next byte) string {
 // translation still tells the truth.
 func (m *M) LoadedRange() (lo, hi uint16, ok bool) {
 	return m.loadLo, m.loadHi, m.loadHi != 0
+}
+
+// bootable reports whether a boot sector has code in it to run.
+//
+// The disk ROM copies sector zero to C000h and calls C01Eh, which is
+// thirty bytes in -- past the parameter block a filesystem would put
+// there. A floppy that is not meant to boot leaves that spot alone, and
+// the sector's first bytes are the `EB FE 90` an unbootable disk carries;
+// one that is meant to boot has an instruction there.
+func bootable(sec []byte) bool {
+	if len(sec) < 0x20 {
+		return false
+	}
+	op := sec[0x1E]
+	return op != 0 && op != 0xFF
+}
+
+// bootSector runs a floppy that carries no filesystem, which is how a
+// game that formatted its own disks starts: the disk ROM reads sector
+// zero to C000h and calls C01Eh, and from there the game reads raw
+// sectors through the disk ROM itself. See diskROM.
+//
+// The registers are what the reference machine has at C01Eh, measured
+// rather than assumed: the stack just under the sector it just read, and
+// two work-area pointers the disk ROM leaves behind.
+func (m *M) bootSector(d *Disk) error {
+	sec := d.ReadSector(0)
+	if sec == nil {
+		return fmt.Errorf("z80: the floppy has no boot sector")
+	}
+	for i, v := range sec {
+		m.Mem[0xC000+i] = v
+	}
+	// The disk ROM calls the boot sector *twice*, and the carry flag is
+	// which time it is. Measured on the reference machine: the first
+	// call arrives with carry clear and Snatcher's sector answers it by
+	// returning at once; the second arrives with carry set, and that
+	// one never comes back -- it is the game. A machine that calls once
+	// gets the answer to the question it did not mean to ask, which
+	// here is a boot sector that returns and a disk that looks dead.
+	//
+	// The registers are the reference machine's at C01Eh, measured
+	// rather than assumed: the stack just under the sector, and two
+	// work-area pointers the disk ROM leaves behind.
+	setup := func(sp uint16, carry bool) {
+		m.SP = sp
+		m.A = 0
+		m.setBC(0)
+		m.setDE(0xF368)
+		m.setHL(0xF323)
+		m.Fc = carry
+	}
+	setup(0xC1FC, false)
+	m.run(0xC01E)
+	setup(0xC1FE, true)
+	return m.runEntry(0xC01E, "the disk's boot sector")
 }
