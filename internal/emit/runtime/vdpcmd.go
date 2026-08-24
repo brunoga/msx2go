@@ -108,11 +108,18 @@ const (
 // four; Graphic 7 one over 256.
 func (v *VDP) pixelsPerByte() int {
 	switch v.Mode() {
-	case ModeGraphic5, ModeGraphic6:
+	case ModeGraphic5:
+		// SCREEN 6: two bits a pixel, four to the byte.
 		return 4
 	case ModeGraphic7:
+		// SCREEN 8: the byte is the colour.
 		return 1
 	}
+	// SCREEN 5 and SCREEN 7 both carry four bits a pixel. They differ in
+	// how many bytes a line holds, not in how a byte is cut, and counting
+	// SCREEN 7 as four pixels a byte put every coordinate the command
+	// engine computed at half the address it wanted and read two-bit
+	// pixels out of four-bit ones.
 	return 2
 }
 
