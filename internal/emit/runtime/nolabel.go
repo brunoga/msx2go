@@ -284,5 +284,13 @@ func (m *M) retBail() bool {
 	if m.runMark != 0 && m.SP > m.runMark {
 		return true
 	}
-	return m.bridgeDepth > 0 && m.cycLimit != 0 && m.Cyc >= m.cycLimit
+	if m.bridgeDepth == 0 {
+		return false
+	}
+	// A bridged run owes the interpreter every reason it would itself
+	// have stopped, or the two engines disagree about when a frame
+	// ends. bootStop is the boot runaway asking for a clean hand-back
+	// and is left set for the interpreter to consume; the budget is
+	// the frame's, and only a main thread has one.
+	return m.bootStop || (m.cycLimit != 0 && m.Cyc >= m.cycLimit)
 }

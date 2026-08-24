@@ -97,7 +97,12 @@ func (m *M) Interpret(mark uint16, steps int) int {
 		// crossing: the routine finds its real return address on the
 		// stack, so code that reads it -- a threaded interpreter, a
 		// dispatcher after the call site -- reads the truth.
+		// Never start a crossing whose budget is already gone: a
+		// bridged routine can only hand back at a ret, so entering
+		// one past the limit spends a whole routine of somebody
+		// else's frame. Let the interpreter's own check end it.
 		if bridgeCall[op] && m.SP == spBefore-2 && m.PC >= 0x4000 &&
+			(m.cycLimit == 0 || m.Cyc < m.cycLimit) &&
 			m.canBridge() && labelAt(m.PC) {
 			m.bridgeInto(m.PC, m.SP)
 		}
@@ -118,6 +123,16 @@ var bridgeCall = [256]bool{
 // not name an instruction without the paging, and the banked dispatch
 // speaks offsets, not addresses.
 func (m *M) canBridge() bool {
+	if m.booting {
+		// Boot is the interpreter's own dance: the runaway detector
+		// that decides a cartridge's shape, the halt promotion, the
+		// hand-back at an instruction boundary. None of it can reach
+		// inside translated code, and INIT is the game loop itself
+		// for a main-thread cartridge -- so a bridge here enters the
+		// whole game and never comes back. Castle Excellent ran
+		// twenty-nine seconds of machine time inside frame one.
+		return false
+	}
 	return !m.transStale && m.mem.nbanks <= 1 && len(TranslatedAddrs) > 0
 }
 
