@@ -148,6 +148,25 @@ func (m *M) walk(s snapper) {
 		m.syncDisk()
 	}
 
+	// The memory mapper's segments: which one is in each page, and the
+	// bytes of the ones that are not. A game that uses mapper RAM keeps
+	// most of itself there, so a snapshot without them comes back with
+	// sixteen K of the game and a hundred and twelve of nothing.
+	ns := len(m.ramStore)
+	s.int(&ns)
+	if s.reading() && ns != len(m.ramStore) {
+		m.ramStore = make([][]byte, ns)
+		for i := range m.ramStore {
+			m.ramStore[i] = make([]byte, ramSegSize)
+		}
+	}
+	for i := range m.ramStore {
+		s.bytes(m.ramStore[i])
+	}
+	for i := range m.ramSeg {
+		s.int(&m.ramSeg[i])
+	}
+
 	s.bytes(m.PSG.Reg[:])
 
 	// The sound chip in the mapper, where there is one.

@@ -192,7 +192,22 @@ func (m *M) bios(addr uint16) {
 	case dosBDOS, 0x0005: // the disk function call, from BASIC or from DOS
 		m.dos()
 
-	case 0x005F: // CHGMOD  a screen mode the cartridge sets itself anyway
+	case 0x005F: // CHGMOD  set up the screen mode in A
+		// This did nothing, on the reasoning that a cartridge sets
+		// the chip up itself anyway -- true of every cartridge here,
+		// and not true of a disk program, which asks the BIOS the way
+		// a program is supposed to. Snatcher asks, and a machine that
+		// shrugged left it on the screen it booted in.
+		//
+		// The main ROM's own entry only knows the four text and tile
+		// screens; the bitmap ones belong to the sub-ROM. Both are
+		// set up the same way here, because both are this machine's.
+		if m.A <= 3 {
+			m.setScreen(int(m.A))
+		} else {
+			m.setScreenBitmap(int(m.A))
+		}
+		m.clsScreen()
 
 	case 0x0062: // CHGCLR  the screen colours, from the work area
 		// Read out of C-BIOS at 02D4h: register 7 takes the foreground
@@ -618,6 +633,15 @@ func (m *M) InstallSystemBytes() {
 		m.Mem[Locale+1] = 0x11
 	}
 	m.Mem[Version] = 1
+	// The MSX2 work area's screen-and-memory byte, which the sub-ROM
+	// maintains on a real machine and which a program is entitled to
+	// read before it has touched the chip at all. Snatcher reads bits
+	// one and two of it before doing anything else and refuses to run
+	// on a machine that answers with less than two -- so a machine
+	// that leaves it at zero gets the game's own "this will not run
+	// here" message and nothing else. Four is what the reference
+	// machine holds.
+	m.Mem[0xFAFC] = 0x04
 
 	// The slot layout, which is a fiction here -- everything is paged in
 	// already -- but has to be a *consistent* fiction, because a
@@ -640,6 +664,16 @@ func (m *M) InstallSystemBytes() {
 	m.PrimarySlot = 0xF4
 	copy(m.Mem[0xFCC1:], []byte{0x00, 0x00, 0x00, 0x80})
 	copy(m.Mem[0xFCC5:], []byte{0x00, 0x00, 0x00, 0xA0})
+	// Where the RAM is, one byte per page: expanded slot three, subslot
+	// two, which is what the slot table above already says and what the
+	// reference machine holds. A program that wants RAM in a page does
+	// not assume where it is -- it reads these and calls ENASLT with
+	// what it finds. Left at zero that call asks for slot zero, which
+	// is the BIOS, and Snatcher put the BIOS where its own code should
+	// have been and ran off into it.
+	for a := uint16(0xF341); a <= 0xF344; a++ {
+		m.Mem[a] = 0x8B
+	}
 
 	m.installWorkArea()
 

@@ -117,7 +117,7 @@ func TestSnapshotRejectsAnotherCartridge(t *testing.T) {
 //     images, the floppies the machine was handed. Which of them is in
 //     which drive *is* state, so inDrive and curDrive are saved.
 func TestSnapshotCoversTheMachine(t *testing.T) {
-	const known = 101
+	const known = 103
 	if n := reflect.TypeOf(M{}).NumField(); n != known {
 		t.Errorf("M has %d fields, this test was written against %d. "+
 			"A new one may need adding to walk in snapshot.go.", n, known)

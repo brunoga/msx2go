@@ -161,6 +161,10 @@ type M struct {
 	// diskSwapped is set when a floppy is changed, for the disk ROM's
 	// "has the disk been swapped" call to report once. See diskROM.
 	diskSwapped bool
+	// The memory mapper: which segment is in each page, and the bytes
+	// of the segments that are not. See rammapper.go.
+	ramSeg   [4]int
+	ramStore [][]byte
 
 	// dma is where the disk function calls read to and write from, which
 	// a program sets with function 1Ah. MSX-DOS starts it at 0080h.
@@ -803,6 +807,10 @@ func (m *M) cpdr() {
 // --- I/O ------------------------------------------------------------------
 
 func (m *M) out(port, v byte) {
+	if page, ok := ramMapperPort(port); ok && m.hasRAMMapper() {
+		m.setRAMSegment(page, int(v))
+		return
+	}
 	switch port {
 	case 0x98:
 		m.VDP.WriteData(v)
@@ -842,6 +850,9 @@ func (m *M) out(port, v byte) {
 }
 
 func (m *M) in(port byte) byte {
+	if page, ok := ramMapperPort(port); ok && m.hasRAMMapper() {
+		return m.ramSegmentOf(page)
+	}
 	switch port {
 	case 0x98:
 		return m.VDP.ReadData()

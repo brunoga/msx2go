@@ -664,7 +664,12 @@ func (m *M) slotRead(sl byte, a uint16) byte {
 	if sl&3 == slotCart && m.diskMachine() {
 		return diskROMByte(a)
 	}
-	if sl&3 == slotRAM && a < 0xC000 {
+	if sl&3 == slotRAM && a < 0xC000 && !m.diskMachine() {
+		// On a cartridge machine the RAM slot answers with an
+		// untouched byte where the cartridge is paged in, so a
+		// cartridge hunting for its own signature finds it in exactly
+		// one place. A disk machine has no cartridge and the whole
+		// address space really is RAM.
 		return 0
 	}
 	return m.Mem[a]
