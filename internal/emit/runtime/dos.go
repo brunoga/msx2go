@@ -556,30 +556,28 @@ func (m *M) diskBoot() {
 	m.run(m.rd16(hStkE + 1))
 }
 
-// biosPageZero puts the BIOS back into page zero, which is the state this
-// entry leaves the machine in: BASIC runs with the BIOS below it, and a
-// program that arrives through the stack-end hook arrives into that machine
-// rather than into the one the disk operating system had.
+// biosPageZero gives back the two bytes in page zero that name the VDP's
+// ports.
 //
-// It matters for more than the shims. Page zero is where the BIOS keeps the
-// two bytes naming the VDP's ports, and a program that has stopped being a
-// disk program reads them from there directly rather than through a slot,
-// because by then they are simply in front of it. Under the operating system
-// those same two addresses are the operand of the kernel's own entry: leave
-// them and the program takes the low half of a work-area address for a pair
-// of port numbers and talks to ports that do not exist. Snatcher does, and
-// then waits forever for a command engine it cannot hear to go quiet.
+// A program that has stopped being a disk program reads them from 0006h and
+// 0007h directly. Under the operating system those two addresses are the
+// operand of the kernel's own entry at 0005h, which this machine wrote there
+// itself when it loaded the program, so what it hands back is its own
+// clobber rather than anything the program did.
 //
-// The switch is one way. Nothing here goes back to being a disk program, and
-// a machine that modelled the return would need page zero's RAM kept whole
-// underneath, which nothing has asked for.
+// Only those two. Page zero is under the memory mapper as well as under the
+// slots, and this machine keeps one flat memory for both: Snatcher switches
+// page zero's segment between two of its own while it runs, and a wholesale
+// swap of the BIOS's page zero into that memory is written straight back out
+// into whichever segment the game switches to next, which corrupts a segment
+// it is about to execute. Modelling page zero's slot properly means keeping
+// the RAM underneath it whole, which is a larger change than this.
 func (m *M) biosPageZero() {
 	if m.bios0 == nil {
 		return
 	}
-	copy(m.Mem[:0x4000], m.bios0)
-	m.PrimarySlot &^= 3
-	m.dosProgram = false
+	m.Mem[VDPDataRead] = m.bios0[VDPDataRead]
+	m.Mem[VDPDataWrite] = m.bios0[VDPDataWrite]
 }
 
 func (m *M) diskROM(a uint16) {
