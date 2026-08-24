@@ -161,6 +161,12 @@ type M struct {
 	// diskSwapped is set when a floppy is changed, for the disk ROM's
 	// "has the disk been swapped" call to report once. See diskROM.
 	diskSwapped bool
+	// dosProgram says a program loaded by the disk operating system is
+	// running, which changes what page zero holds. See hdboot.go.
+	dosProgram bool
+	// cwd is the directory the disk calls look in, which a hard disk's
+	// batch file changes and a floppy never has. See hdboot.go.
+	cwd int
 	// The memory mapper: which segment is in each page, and the bytes
 	// of the segments that are not. See rammapper.go.
 	ramSeg   [4]int

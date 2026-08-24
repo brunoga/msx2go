@@ -364,6 +364,18 @@ func (m *M) isBIOS(a uint16) bool {
 		// these addresses; a cartridge machine never reaches here.
 		return true
 	}
+	if m.dosProgram && interSlotEntry[a] {
+		// A program running under the disk operating system has RAM
+		// in page zero, not the BIOS -- but the inter-slot routines
+		// still answer there, because the kernel keeps them working:
+		// switching slots is how a program reaches anything outside
+		// the sixty-four K it is running in, and it cannot do that
+		// without them. Snatcher's loader calls ENASLT four
+		// instructions into counting the machine's memory, and a
+		// machine that let that run into empty RAM wandered back to
+		// the program's start and began again, for ever.
+		return true
+	}
 	if m.Disk != nil && a == dosBDOS {
 		// Disk BASIC's function-call entry point lives in the work
 		// area, above the ROM, so it needs naming rather than a range.
@@ -909,4 +921,11 @@ func (m *M) Learned() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// interSlotEntry is the group of page-zero routines that keep answering
+// while a disk program runs: read and write a byte in another slot, call a
+// routine in one, and page one in. See isBIOS.
+var interSlotEntry = map[uint16]bool{
+	0x000C: true, 0x0014: true, 0x001C: true, 0x0024: true, 0x0030: true,
 }

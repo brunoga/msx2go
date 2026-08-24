@@ -21,10 +21,11 @@ package z80
 // ramSegSize is a mapper segment: 16K, one page of the address space.
 const ramSegSize = 0x4000
 
-// ramSegments is how many segments this machine has, which is 128K -- the
-// size an MSX2 disk machine is expected to have, and the size the games that
-// ask about it are asking for.
-const ramSegments = 8
+// ramSegments is how many segments this machine has: 256K, which is what a
+// disk machine of this era is built out of once it has a mapper at all, and
+// what the games that count them are counting up to. Snatcher wants nine
+// before it will start.
+const ramSegments = 16
 
 // initRAMMapper gives the machine its segments, mapped the way an MSX2
 // leaves them at power-on: the highest segment in page zero, counting down,

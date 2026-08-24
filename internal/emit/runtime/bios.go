@@ -455,7 +455,15 @@ func (m *M) bios(addr uint16) {
 		// machine shims rather than holds, which is how a game that
 		// found the disk ROM by scanning the slots calls DSKIO. Going
 		// straight to IX there would execute whatever RAM is at 4010h.
-		if m.isBIOS(m.IX) {
+		// Which slot is not a guess here: CALSLT is told, in IY. A
+		// routine in the BIOS's slot is a BIOS routine even while
+		// page zero holds something else, and that is the whole
+		// point of the call -- it is how a program running under the
+		// disk operating system, whose page zero is its own RAM,
+		// reaches the BIOS at all. Deciding by what page zero holds
+		// instead sent Snatcher's screen setup into its own data.
+		inBIOSSlot := m.IX < 0x4000 && byte(m.IY>>8)&3 == slotBIOS
+		if m.isBIOS(m.IX) || inBIOSSlot {
 			m.bios(m.IX)
 		} else {
 			m.run(m.IX)

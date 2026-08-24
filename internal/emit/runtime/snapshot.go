@@ -116,6 +116,10 @@ func (m *M) walk(s snapper) {
 		// A swap the disk ROM has not been told about yet is state:
 		// restoring must still let the game notice the floppy moved.
 		&m.diskSwapped,
+		// Whether a program loaded by the disk operating system is
+		// running, which decides whether page zero answers as the
+		// BIOS or as the program's own memory.
+		&m.dosProgram,
 	} {
 		s.bool(p)
 	}
@@ -144,6 +148,7 @@ func (m *M) walk(s snapper) {
 		s.int(&m.inDrive[i])
 	}
 	s.int(&m.curDrive)
+	s.int(&m.cwd)
 	if s.reading() {
 		m.syncDisk()
 	}

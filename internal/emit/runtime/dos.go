@@ -72,6 +72,14 @@ func (m *M) dos() {
 			m.chPut(c)
 		}
 		m.A = 0
+	case 0x6F: // which MSX-DOS this is: B is the kernel's major version
+		// Two, because that is what this machine's disk calls
+		// behave like: directories on a path, a memory mapper, and
+		// the segment count the kernel keeps. Answering one sends a
+		// program down the path for a machine without them, and
+		// Snatcher's loader says so and stops.
+		m.B = 2
+		m.A = 0
 	case 0x0C: // return the version
 		m.setHL(0x0022)
 		m.A = 0
@@ -283,7 +291,7 @@ func (m *M) dosOpen(fcb uint16) *dosFile {
 		m.dosFlush(f)
 		delete(m.files, fcb)
 	}
-	data, ok := want.Open(name)
+	data, ok := want.ReadAt(m.cwd, name)
 	if !ok {
 		return nil
 	}

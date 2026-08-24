@@ -50,6 +50,11 @@ func (m *M) BootDisk(d *Disk, start string) error {
 	}
 	m.syncDisk()
 
+	// A hard disk boots through the operating system on it, not through
+	// BASIC and not through a boot sector. See hdboot.go.
+	if d.HardDisk() && start == "" && m.DiskRun == "" {
+		return m.bootHardDisk(d)
+	}
 	if start == "" {
 		start = m.DiskRun
 	}
