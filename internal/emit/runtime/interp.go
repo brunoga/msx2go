@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // A fetch/decode/execute loop, which is the one thing the rest of this
@@ -79,6 +80,7 @@ func (m *M) Interpret(mark uint16, steps int) int {
 		if m.LearnSites {
 			m.learnPC()
 		}
+		op, spBefore := m.Mem[m.PC], m.SP
 		m.Executed++
 		if m.stepCatching() {
 			// A handler hijacked the machine mid-instruction; the
@@ -88,8 +90,55 @@ func (m *M) Interpret(mark uint16, steps int) int {
 			// new thread's next instruction.
 			continue
 		}
+		// The bridge: a call whose target is a translated label runs
+		// translated, and comes back here when the routine returns --
+		// the stack rising above the call's own level, which is this
+		// loop's stopping rule too. Call boundaries are the only safe
+		// crossing: the routine finds its real return address on the
+		// stack, so code that reads it -- a threaded interpreter, a
+		// dispatcher after the call site -- reads the truth.
+		if bridgeCall[op] && m.SP == spBefore-2 && m.PC >= 0x4000 &&
+			m.canBridge() && labelAt(m.PC) {
+			m.bridgeInto(m.PC, m.SP)
+		}
 	}
 	return n
+}
+
+// bridgeCall is the call-shaped opcodes: `call nn` and its conditional
+// forms. `rst` always lands in page zero, which is the BIOS, and never
+// bridges.
+var bridgeCall = [256]bool{
+	0xCD: true, 0xC4: true, 0xCC: true, 0xD4: true, 0xDC: true,
+	0xE4: true, 0xEC: true, 0xF4: true, 0xFC: true,
+}
+
+// canBridge says the translation may be entered from here: it is not
+// stale, and the image is flat -- on a banked cartridge an address does
+// not name an instruction without the paging, and the banked dispatch
+// speaks offsets, not addresses.
+func (m *M) canBridge() bool {
+	return !m.transStale && m.mem.nbanks <= 1 && len(TranslatedAddrs) > 0
+}
+
+// labelAt reports whether the translation has a label at pc, from the
+// published address list, spread into a table on first use.
+var (
+	labelSetOnce sync.Once
+	labelSet     []bool
+)
+
+func labelAt(pc uint16) bool {
+	labelSetOnce.Do(func() {
+		if len(TranslatedAddrs) == 0 {
+			return
+		}
+		labelSet = make([]bool, 0x10000)
+		for _, a := range TranslatedAddrs {
+			labelSet[a] = true
+		}
+	})
+	return labelSet != nil && labelSet[pc]
 }
 
 func (m *M) f8() byte {

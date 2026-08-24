@@ -97,4 +97,3 @@ The regression battery is manual today. Before tagging:
   ingredients exist; see the Breaker notes.
 - WASM build of the play harness (Ebitengine supports it; the data loader
   already refuses politely on `js` without `msxdata`).
-- The interpreter→translation bridge, for fully-generated floppy titles.

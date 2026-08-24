@@ -115,7 +115,7 @@ func TestSnapshotRejectsAnotherCartridge(t *testing.T) {
 //     changed. Its written sectors are saved beside it, not in a snapshot,
 //     and dma, files, searchFor and searchAt go with it.
 func TestSnapshotCoversTheMachine(t *testing.T) {
-	const known = 96
+	const known = 97
 	if n := reflect.TypeOf(M{}).NumField(); n != known {
 		t.Errorf("M has %d fields, this test was written against %d. "+
 			"A new one may need adding to walk in snapshot.go.", n, known)

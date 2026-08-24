@@ -19,3 +19,16 @@ func (m *M) Run(entry uint16) {
 	m.idle, m.halted = false, false
 	m.Interpret(m.runMark, maxInterpSteps)
 }
+
+// RunAt is Run without the sentinel: enter at entry with whatever the
+// stack holds and interpret to the current mark. The generated modules
+// translate it; here everything is the interpreter anyway.
+func (m *M) RunAt(entry uint16) {
+	m.PC = entry
+	m.idle, m.halted = false, false
+	m.Interpret(m.runMark, maxInterpSteps)
+}
+
+// TranslatedAddrs is empty here: nothing is translated, so the bridge in
+// interp.go never fires. The generated rom_gen.go supplies the real list.
+var TranslatedAddrs = []uint16{}

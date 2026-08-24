@@ -226,6 +226,10 @@ type M struct {
 	// edited floppy -- and the machine must interpret instead.
 	loadLo, loadHi uint16
 	transStale     bool
+	// bridgeDepth counts nested interpreter-to-translation crossings,
+	// so a bridged run knows to respect the frame's cycle budget at
+	// its returns. See bridgeInto and retBail.
+	bridgeDepth int
 
 	// frameStart is m.Cyc when the current frame began, so a frame that
 	// never ends can be noticed. See FrameRunaway.

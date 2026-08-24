@@ -198,6 +198,18 @@ func (r Run) generateBanked() ([]byte, []error, error) {
 	}
 	w("\tgoto ret_")
 	w("}")
+	w("")
+	w("// RunAt and TranslatedAddrs satisfy the interpreter bridge, which")
+	w("// a banked cartridge never crosses: an address does not name an")
+	w("// instruction without the paging, so canBridge is always false")
+	w("// here and RunAt only ever interprets.")
+	w("func (m *M) RunAt(entry uint16) {")
+	w("\tm.PC = entry")
+	w("\tm.idle, m.halted = false, false")
+	w("\tm.Interpret(m.runMark, maxInterpSteps)")
+	w("}")
+	w("")
+	w("var TranslatedAddrs = []uint16{}")
 	return finish(b, bad)
 }
 

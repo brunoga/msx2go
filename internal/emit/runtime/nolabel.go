@@ -228,3 +228,45 @@ func (m *M) biosUnknown(addr uint16) {
 		"sp=%04Xh, stack says %04Xh called it. %s",
 		addr, biosName(addr), m.PC, m.SP, ret, how))
 }
+
+// bridgeInto hands a called routine to the translation mid-interpretation:
+// the interpreter executed the call, so the real return address is on the
+// stack, and the mark is the stack level just after it -- the routine is
+// over the moment the stack rises past it, exactly the rule Interpret
+// stops by. runMark is saved and restored so a nested noLabel inside the
+// bridged run interprets to this level and no further.
+func (m *M) bridgeInto(entry, mark uint16) {
+	was := m.runMark
+	m.runMark = mark
+	m.bridgeDepth++
+	defer func() { m.bridgeDepth-- }()
+	defer func() {
+		m.runMark = was
+		if r := recover(); r != nil {
+			if _, ok := r.(runFinished); ok {
+				return
+			}
+			if _, ok := r.(hijacked); ok {
+				// The routine took the machine over; the
+				// interpreter's own mark checks see the new
+				// stack next iteration.
+				return
+			}
+			panic(r)
+		}
+	}()
+	m.RunAt(entry)
+}
+
+// retBail is the translation's exit check at every ret, after the
+// sentinel. Two reasons to hand back: the stack rose above the mark --
+// the routine the caller wanted is over, which is the interpreter's own
+// stopping rule -- or a bridged run has spent the frame's cycle budget.
+// The program counter was just popped, so execution resumes exactly here
+// in the interpreter: bailing is a deoptimisation, never a divergence.
+func (m *M) retBail() bool {
+	if m.runMark != 0 && m.SP > m.runMark {
+		return true
+	}
+	return m.bridgeDepth > 0 && m.cycLimit != 0 && m.Cyc >= m.cycLimit
+}

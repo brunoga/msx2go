@@ -160,9 +160,16 @@ a forced arm can walk into data — so pruning never believes them, and the
 72-second exploration reaches within a few percent of what three
 interactive learn rounds found.
 
-For a floppy, the main game thread runs interpreted by design (the
-translation currently enters through the per-frame interrupt path);
-`sites.txt` in the output directory is picked up the same way.
+For a floppy, `sites.txt` in the output directory is picked up the same
+way. The main thread crosses into the translation at call boundaries:
+when the interpreter executes a call whose target is a translated label,
+the routine runs translated and hands back when the stack rises past the
+call — the interpreter's own stopping rule, so code that reads its
+return address off the stack still reads the truth. A bridged run that
+outlives the frame's cycle budget hands back at its next return, which
+is a deoptimisation, never a divergence. On Breaker this takes the share
+of instructions running translated from 8% to 99%, with the picture
+sequence identical to the interpreter-only build frame for frame.
 
 ## msxrun: the workbench
 
