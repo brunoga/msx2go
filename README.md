@@ -148,6 +148,18 @@ A translation covers the code that was seen. To grow it:
 fed back still works — it falls back to the interpreter at run time and is
 written down. The loop is done when a long, varied run reports nothing new.
 
+`-explore n` maps by force instead of play: it boots the machine, then
+forks it at every conditional branch and runs both arms, at most n
+instructions in total. Every fork is a real machine state, so dynamic
+jumps — dispatchers, threaded code — have concrete targets, and because
+only code coverage is wanted, each branch arm is forked once and the work
+stays linear. What it finds goes to `explored.txt` beside `sites.txt`:
+explored addresses seed the tracer but are candidates, not observations —
+a forced arm can walk into data — so pruning never believes them, and the
+`-interpret` twin comparison remains the test of truth. On Breaker, one
+72-second exploration reaches within a few percent of what three
+interactive learn rounds found.
+
 For a floppy, the main game thread runs interpreted by design (the
 translation currently enters through the per-frame interrupt path);
 `sites.txt` in the output directory is picked up the same way.

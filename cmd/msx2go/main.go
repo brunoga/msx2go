@@ -59,6 +59,11 @@ func main() {
 		"feeding back every address the cartridge reaches that the "+
 		"trace missed, for at most this many rounds")
 	frames := flag.Int("frames", 3000, "how many frames a discovery round runs")
+	exploreN := flag.Int("explore", 0, "fork the booted machine at every "+
+		"conditional branch and run both arms, for at most this many "+
+		"instructions in total: forced coverage of code no played run "+
+		"reaches, fed into sites.txt beside the sweep's observations. "+
+		"0 is off")
 	sweepN := flag.Int("sweep", 20000, "interpret the cartridge for this many "+
 		"frames first and translate what it was seen to execute; 0 to "+
 		"translate only what static analysis can prove")
@@ -76,7 +81,8 @@ func main() {
 		os.Exit(2)
 	}
 	if *dsk != "" {
-		if err := disk(*dsk, *name, *out, *modpath, *machine, *runBas); err != nil {
+		if err := disk(*dsk, *name, *out, *modpath, *machine, *runBas,
+			*exploreN); err != nil {
 			die(err)
 		}
 		return
@@ -152,9 +158,21 @@ func main() {
 			die(err)
 		}
 	}
+	if *exploreN > 0 {
+		if err := exploreImage(data, info, uint16(*base), *out,
+			*exploreN, *quota); err != nil {
+			die(err)
+		}
+	}
 	sites, err := trace.ReadSites(sitesPath(*sitesFile, *out))
 	if err != nil {
 		die(err)
+	}
+	// What was watched executing is what pruning may believe; the
+	// explored candidates only seed the tracer, below.
+	observed := sites
+	if explored, err := trace.ReadSites(exploredPath(*out)); err == nil {
+		sites = append(append([]trace.State{}, sites...), explored...)
 	}
 	// What was watched executing, as image offsets: the fact pruning is
 	// entitled to believe. See emit.Module.blocks.
@@ -165,8 +183,8 @@ func main() {
 	// keep too much, never too little. Deriving it only when -sweep ran
 	// meant `-sweep 0 -sites <the sweep's own answer>` silently fell back
 	// to the tracer's guess and pruned away data the cartridge needs.
-	if len(sites) > 0 {
-		executed = executedOffsets(sites, info, len(data))
+	if len(observed) > 0 {
+		executed = executedOffsets(observed, info, len(data))
 	}
 	if err := generate(data, info, *out, *config, *modpath, *whole,
 		*minrun, sites, executed); err != nil {
@@ -219,7 +237,7 @@ func interpreted(rom []byte, info z80.Info, out, modpath string, base uint16) er
 // What the disk *is* comes out of the image, so any disk can be handed over:
 // the geometry from its BIOS parameter block, the boot program from its
 // directory, and the shape of the program from booting it and watching.
-func disk(path, name, out, modpath, machine, runBas string) error {
+func disk(path, name, out, modpath, machine, runBas string, exploreBudget int) error {
 	img, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -290,9 +308,38 @@ func disk(path, name, out, modpath, machine, runBas string) error {
 						Addr: trace.Addr(h), Reason: "interrupt hook"})
 				}
 			}
+			if exploreBudget > 0 && out != "" {
+				seen := map[string]bool{}
+				for _, f := range []string{sitesPath("", out),
+					exploredPath(out)} {
+					if old, err := trace.ReadSites(f); err == nil {
+						for _, st := range old {
+							seen[siteLine(st.Addr, st.Banks)] = true
+						}
+					}
+				}
+				before := len(seen)
+				freshDisk := func() *z80.M {
+					mm := z80.New(nil, z80.Mapper{})
+					mm.Disk = d
+					return mm
+				}
+				explore(probe, freshDisk, exploreBudget, seen)
+				if err := writeSites(exploredPath(out), seen,
+					"# Written by msx2go -explore: candidates, "+
+						"not observations.\n"); err != nil {
+					return err
+				}
+				fmt.Printf("  explore  %d instruction budget: "+
+					"%d address(es), %d new\n",
+					exploreBudget, len(seen), len(seen)-before)
+			}
 			sites, err := trace.ReadSites(sitesPath("", out))
 			if err != nil {
 				return err
+			}
+			if explored, err := trace.ReadSites(exploredPath(out)); err == nil {
+				sites = append(sites, explored...)
 			}
 			kept := sites[:0]
 			for _, st := range sites {

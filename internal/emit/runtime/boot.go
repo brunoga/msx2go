@@ -459,6 +459,16 @@ func (m *M) InterruptEntries() []uint16 {
 // cartridge meant.
 func (m *M) Idle() { m.idle = true }
 
+// Stopped reports whether the processor has nothing left to run: idle in
+// its self-jump, or halted waiting for an interrupt. ResumeFromHalt clears
+// the halt the way a delivered interrupt does, for a driver -- the
+// explorer -- that stands in for one.
+func (m *M) Stopped() (idle, halted bool) { return m.idle, m.halted }
+
+// ResumeFromHalt continues a halted processor at the instruction after the
+// halt. See Stopped.
+func (m *M) ResumeFromHalt() { m.halted = false }
+
 // Idling reports whether the last Run ended at a self-jump rather than a ret.
 func (m *M) Idling() bool { return m.idle }
 
