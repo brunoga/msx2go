@@ -52,3 +52,31 @@ the score and the level are the same. Making it exact means paying the
 overshoot back out of the next frame's budget, which is a change to the
 timing model every main-thread title shares, and it wants the reference
 machine as its arbiter rather than internal consistency alone.
+
+## And the music was missing a voice
+
+Reported by ear, found by counting. Channel A is this driver's
+envelope-driven voice, and over three thousand frames it contributed
+33,464 audible samples where B contributed 3.1 million.
+
+The synthesiser is fed writes rather than the register file, because a
+write is an event: register 13 is the envelope shape and writing it
+restarts the envelope, so pushing the file every frame would retrigger
+it sixty times a second. But it has to *start* somewhere, and the driver
+sets the envelope period once during initialisation and never again --
+so a synthesiser built after boot never learned it, read the period as
+one, and decayed every note to silence in two milliseconds. It now
+adopts the chip's registers at first sound, and again whenever a
+snapshot is restored, since a restored machine has register state and no
+write history at all.
+
+Underneath that, the envelope ran sixteen times too slow: its step clock
+is half the tone generator's, so a step is EP*16 clocks rather than the
+EP*256 this synthesiser was counting. The bass held at full volume
+instead of decaying. openMSX's AY8910 says the same and doubles its
+period register for the same reason.
+
+Neither shows up in a digest, which hashes the register file -- the
+synthesiser reads that file rather than writing it. Audio has to be
+measured on its own terms: audible samples per channel, and the write
+counts that reveal a register the driver only ever sets at boot.
