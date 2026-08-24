@@ -156,3 +156,23 @@ func (d *Disk) read(clus, size int) []byte {
 // only to decide how to boot: a floppy boots through BASIC or its own boot
 // sector, a hard disk boots through the disk operating system on it.
 func (d *Disk) HardDisk() bool { return len(d.img) > 2<<20 }
+
+// FilesIn lists one directory the way Files lists the root.
+//
+// A program searching for a name searches the directory it is in, not the
+// root, and on a hard disk those are almost never the same place. A search
+// that always read the root answered "no such file" for every file a game
+// keeps beside itself, and the game believed it.
+func (d *Disk) FilesIn(dir int) []DiskFile {
+	if dir == rootDir {
+		return d.Files()
+	}
+	var out []DiskFile
+	for _, e := range d.list(dir) {
+		if e.isDir {
+			continue
+		}
+		out = append(out, DiskFile{Name: e.name, Size: e.size, clus: e.clus})
+	}
+	return out
+}

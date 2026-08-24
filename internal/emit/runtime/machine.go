@@ -161,6 +161,12 @@ type M struct {
 	// diskSwapped is set when a floppy is changed, for the disk ROM's
 	// "has the disk been swapped" call to report once. See diskROM.
 	diskSwapped bool
+	// bios0 is page zero as the BIOS has it, kept apart from page zero
+	// as the machine currently reads it. On real hardware those are two
+	// different memories in two different slots; here there is one flat
+	// address space, so the BIOS's copy is kept beside it for the slot
+	// reads that ask for it by slot. See slotRead.
+	bios0 []byte
 	// dosProgram says a program loaded by the disk operating system is
 	// running, which changes what page zero holds. See hdboot.go.
 	dosProgram bool
@@ -204,9 +210,14 @@ type M struct {
 	files map[uint16]*dosFile
 
 	// searchFor and searchAt carry a directory search between the call
-	// that starts one and the calls that continue it.
+	// that starts one and the calls that continue it, and searchIn and
+	// searchOn say where it is looking: a search reads the directory the
+	// program is in, on the floppy the block named, and both can change
+	// between one search and the next.
 	searchFor string
 	searchAt  int
+	searchIn  int
+	searchOn  *Disk
 
 	// runMark is the stack level the machine entered translated code at.
 	// The interpreter needs it when it takes over partway through: see

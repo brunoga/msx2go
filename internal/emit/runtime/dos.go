@@ -107,6 +107,7 @@ func (m *M) dos() {
 	case 0x11: // find the first file matching the name
 		m.searchAt = 0
 		m.searchFor = m.fcbNameAt(de)
+		m.searchIn, m.searchOn = m.cwd, m.fcbDisk(de)
 		m.A = m.dosSearch()
 	case 0x12: // and the next
 		m.A = m.dosSearch()
@@ -401,8 +402,13 @@ func (m *M) DOSFlushAll() error {
 // dosSearch fills the transfer address with the next matching directory
 // entry, in the thirty-two byte form a program expects to read there.
 func (m *M) dosSearch() byte {
-	for ; m.searchAt < len(m.Disk.Files()); m.searchAt++ {
-		f := m.Disk.Files()[m.searchAt]
+	on := m.searchOn
+	if on == nil {
+		on = m.Disk
+	}
+	files := on.FilesIn(m.searchIn)
+	for ; m.searchAt < len(files); m.searchAt++ {
+		f := files[m.searchAt]
 		if !dosMatch(m.searchFor, f.Name) {
 			continue
 		}
