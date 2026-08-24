@@ -171,10 +171,13 @@ func (r Run) generateFlat() ([]byte, []error, error) {
 	}
 	w("\tdefault:")
 	if r.BIOSTailCall {
-		w("\t\t// A dynamic jump into page zero is a tail call into")
-		w("\t\t// the BIOS, which is not part of the image and is")
-		w("\t\t// shimmed rather than translated.")
-		w("\t\tif m.PC < 0x4000 {")
+		w("\t\t// A dynamic jump into the BIOS is a tail call into")
+		w("\t\t// it: not part of the image, and shimmed rather")
+		w("\t\t// than translated. Whether page zero *is* the BIOS")
+		w("\t\t// is the machine's to answer, not an address range")
+		w("\t\t// -- under the disk operating system page zero is")
+		w("\t\t// RAM and the program itself is loaded at 0100h.")
+		w("\t\tif m.isBIOS(m.PC) {")
 		w("\t\t\tm.bios(m.PC)")
 		w("\t\t\tgoto ret_")
 		w("\t\t}")
