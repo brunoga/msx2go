@@ -34,6 +34,17 @@ The remaining 2.85 is the `call nz` being taken on some passes, which costs 7
 more. So the model is exactly **+1 T-state per M1 cycle**, and nothing else is
 missing from the instruction timings.
 
+Confirmed a second time, on a different instruction and by a different
+method. The last byte of an `otir` writing to the VDP data port -- Snatcher
+draws its text with one, at CC4Ch -- costs **18** cycles on the reference
+where the raw Z80 figure is 16. `otir` is `ED`-prefixed, so two M1 cycles,
+and 16 + 2 is 18.
+
+That measurement also rules something out worth writing down: there is **no
+extra VDP access-slot stall** on the data port beyond the M1 wait. A byte
+written to port 98h in SCREEN 7 with the display on costs what the
+instruction costs, and no more.
+
 ## What has to change
 
 M1 cycles per instruction are not in any table today; they follow from the
