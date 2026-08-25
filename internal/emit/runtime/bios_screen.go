@@ -139,6 +139,19 @@ func (m *M) setScreen(mode int) {
 		m.setReg(6, byte(pat>>11))
 	}
 	m.setReg(7, colour)
+	// A text or tile screen is 192 lines: the reference's console holds
+	// register 9 at 02h, the frequency bit alone, even at 80 columns.
+	// Clearing LN here is what lets a game go back to text after a
+	// bitmap screen without keeping 212 lines it never asked for.
+	//
+	// Only on a V9938, and only once something has established that it is
+	// one. A TMS9918 has no register 9 at all, and writing one is what
+	// *makes* this machine a V9938 -- so an MSX1 cartridge that never
+	// touched a register above seven would be promoted by its own call to
+	// SCREEN 1. See WriteReg.
+	if m.VDP.V9938 {
+		m.setReg(9, m.VDP.Reg[9]&^byte(0x80))
+	}
 	if mode == 0 {
 		m.setReg(7, m.Mem[forClr]&0x0F<<4|m.Mem[bdrClr]&0x0F)
 	}
@@ -179,12 +192,28 @@ func (m *M) setScreenBitmap(mode int) {
 	m.setReg(0, r0)
 	m.setReg(1, 0x60) // displaying, vertical interrupt on, no mode bits
 	m.setReg(2, 0x1F) // page zero
-	m.setReg(3, 0xFF)
-	m.setReg(4, 0x03)
+	// Registers 3 and 4 are the colour table, which a bitmap screen does
+	// not have, and the real BIOS leaves them exactly as the screen
+	// before this one set them. Measured: the reference goes into
+	// SCREEN 7 from the 80-column console with 27h and 02h in them and
+	// comes out still holding 27h and 02h. Writing our own values here
+	// was harmless to the picture but made every register comparison
+	// against the reference show two differences that were not real.
 	m.setReg(5, r5)
 	m.setReg(6, r6)
-	m.setReg(7, 0)
+	// Register 7 is the border colour on a bitmap screen -- not the
+	// foreground-and-background pair it is in a text mode -- and the BIOS
+	// takes it from BDRCLR. The reference leaves the console with F4h in
+	// it, fore 15 on back 4, and comes out of CHGMOD with 04h.
+	m.setReg(7, m.Mem[bdrClr]&0x0F)
 	m.setReg(11, r11)
+	// A bitmap screen is 212 lines. That is what MSX2 BASIC gives you for
+	// SCREEN 5 to 8, and it is register 9's LN bit: the reference's R9
+	// goes from 02h in the console to 82h the moment the game asks for
+	// SCREEN 7, and a machine that leaves it clear shows 192 lines of a
+	// 212-line picture. The frequency bit beside it is the machine's and
+	// is left alone. See Hz.
+	m.setReg(9, m.VDP.Reg[9]|0x80)
 	m.Mem[oldScr] = m.Mem[scrMod]
 	m.Mem[scrMod] = byte(mode)
 	m.Mem[csrX], m.Mem[csrY] = 1, 1
@@ -631,6 +660,12 @@ const (
 // slotHas reports whether an address exists in a slot at all.
 func (m *M) slotHas(sl byte, a uint16) bool {
 	page := a >> 14
+	// A sound cartridge answers in its own slot, over the page its
+	// registers are in. Checked before the rest because the slot it sits
+	// in is one the machine otherwise leaves empty.
+	if c := m.SndCart; c != nil && sl&3 == c.Slot {
+		return page == 2
+	}
 	switch sl & 3 {
 	case slotBIOS:
 		return page == 0
@@ -660,6 +695,9 @@ func (m *M) slotHas(sl byte, a uint16) bool {
 func (m *M) slotRead(sl byte, a uint16) byte {
 	if !m.slotHas(sl, a) {
 		return 0xFF
+	}
+	if c := m.SndCart; c != nil && sl&3 == c.Slot {
+		return c.sndCartRead(a)
 	}
 	if sl&3 == slotCart && m.diskMachine() {
 		return diskROMByte(a)
