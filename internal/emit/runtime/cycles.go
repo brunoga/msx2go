@@ -229,6 +229,9 @@ func (m *M) FrameOrigin() uint64 { return m.frameOrigin }
 // frames never satisfies a poll inside one. Armed per frame by InterpretRun;
 // handler-shaped games never arm it, and stay exactly as verified.
 func (m *M) dueVblank() {
+	// fDue is the next boundary at which a vertical blank is still owed.
+	// Raising it here advances fDue, so the frame that starts afterwards
+	// knows the flag is already up and does not raise it again.
 	if m.fDue != 0 && m.Cyc >= m.fDue {
 		m.fDue += m.FrameCycles()
 		m.VDP.StartFrame()

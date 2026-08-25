@@ -309,8 +309,18 @@ func (m *M) mainThreadFrame() error {
 	frameStart := m.Cyc
 	m.frameOrigin = frameStart
 	m.VDP.StartLog()
-	m.VDP.StartFrame()
-	m.fDue = frameStart + m.FrameCycles()
+	// The vertical blank rises once a boundary, and whoever reaches the
+	// boundary first raises it. A handler that overran the last frame has
+	// already been past this one -- see dueVblank, which advances fDue as
+	// it raises -- and raising it again here would report the same blank
+	// twice. It did: the flag went up 2.15 times a frame, and a game that
+	// paces itself on the vertical blank got through its work twice as
+	// often as the hardware allows. Snatcher's intro typed and played its
+	// music at several times its speed.
+	if m.Cyc >= m.fDue {
+		m.VDP.StartFrame()
+		m.fDue = frameStart + m.FrameCycles()
+	}
 	// The handler runs outside the frame's budget, and the budget is the
 	// main thread's alone.
 	//
