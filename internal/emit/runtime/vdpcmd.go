@@ -68,6 +68,17 @@ func (v *VDP) XferWrite(b byte) {
 	v.xferStep()
 }
 
+// firstXferByte hands the transfer the byte register 44 is already holding.
+//
+// The documented way to start a transfer into video memory is to put the
+// first byte in register 44 and *then* write the command: the chip takes
+// what the register holds as byte zero, and only asks for the next one
+// through TR. A machine that waits for the next write instead is a byte
+// behind for the whole rectangle -- every byte lands one position early,
+// which is not noise but a picture shifted, and Snatcher loads its logo and
+// its whole font strip through two of these.
+func (v *VDP) firstXferByte() { v.XferWrite(v.Reg[cmdCLR]) }
+
 // XferRead is the next byte of a transfer out of video memory.
 func (v *VDP) XferRead() byte {
 	var b byte
@@ -302,9 +313,11 @@ func (v *VDP) Execute(cmd byte) {
 
 	case 0xB: // LMMC: take a rectangle from the processor, a pixel at a time
 		v.startXfer(xferIn, false, dx, dy, nx, ny, stepX, stepY, op)
+		v.firstXferByte()
 
 	case 0xF: // HMMC: take a rectangle from the processor, whole bytes
 		v.startXfer(xferIn, true, dxB, dy, nxB, ny, stepX, stepY, op)
+		v.firstXferByte()
 	}
 	if v.xfer != xferNone {
 		// A transfer runs at the processor's pace, not the chip's:

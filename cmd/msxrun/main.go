@@ -111,6 +111,16 @@ func main() {
 	stat := flag.Bool("stat", false, "count status-register reads by number")
 	vwrites := flag.Int("vwrites", 0, "count data-port VRAM writes for 50 "+
 		"frames from here, by page")
+	// A disk game does its loading before the first frame is over, so a
+	// window that opens at a frame number cannot see any of it. These two
+	// count from power-on instead, which is how the transfer that draws
+	// Snatcher's menu was found at all.
+	vwall := flag.Int("vwall", 0, "log the first N data-port VRAM writes "+
+		"from power-on, with the full address")
+	regall := flag.Int("regall", 0, "log the first N VDP register writes "+
+		"from power-on")
+	sndCart := flag.String("sndcart", "", "put a Konami sound cartridge in a "+
+		"slot: \"scc\" or \"scc+\", optionally \"scc+:2\" to name the slot")
 	cmds := flag.Bool("cmds", false, "report which VDP commands are used")
 	cmdFrom := flag.Int("cmdfrom", -1, "log every command from this frame on")
 	cmdWin := flag.Int("cmdwin", 20, "how many frames of commands to log")
@@ -558,6 +568,33 @@ func main() {
 			}
 		}()
 	}
+	if *regall > 0 {
+		n := 0
+		m.VDP.OnReg = func(r, v byte) {
+			n++
+			if n <= *regall {
+				fmt.Fprintf(os.Stderr, "    f%d R%d <- %02X (pc=%04X)\n",
+					m.Frames(), r, v, m.PC)
+			}
+		}
+	}
+	if *vwall > 0 {
+		n := 0
+		byPage := map[int]int{}
+		m.VDP.OnWrite = func(addr uint16, b byte) {
+			n++
+			byPage[m.VDP.At()>>14]++
+			if n <= *vwall {
+				fmt.Fprintf(os.Stderr,
+					"    f%d write %05X = %02X (mode %v pc=%04X)\n",
+					m.Frames(), m.VDP.At(), b, m.VDP.Mode(), m.PC)
+			}
+		}
+		defer func() {
+			fmt.Fprintf(os.Stderr, "  %d data-port VRAM writes in all; "+
+				"by 16K page: %v\n", n, byPage)
+		}()
+	}
 	if *vwrites > 0 {
 		byPage := map[int]int{}
 		n := 0
@@ -948,6 +985,28 @@ func main() {
 		fmt.Fprintf(os.Stderr, "msxrun: resumed from %s at frame %d\n",
 			*resume, m.Frames())
 	}
+	// A sound cartridge, for a game that expects one in a slot rather than
+	// a chip in its own mapper. See sndcart.go.
+	if *sndCart != "" {
+		spec, slot := *sndCart, 2
+		if i := strings.IndexByte(spec, ':'); i >= 0 {
+			if _, err := fmt.Sscanf(spec[i+1:], "%d", &slot); err != nil {
+				check(fmt.Errorf("-sndcart wants a slot number "+
+					"after the colon, not %q", spec[i+1:]))
+			}
+			spec = spec[:i]
+		}
+		switch spec {
+		case "scc":
+			check(m.SoundCartIn(byte(slot), false))
+		case "scc+":
+			check(m.SoundCartIn(byte(slot), true))
+		default:
+			check(fmt.Errorf("-sndcart wants \"scc\" or \"scc+\", not %q", spec))
+		}
+		fmt.Fprintf(os.Stderr, "msxrun: %s cartridge in slot %d\n", spec, slot)
+	}
+
 	// The sound the harness would have played, written to a file so it can
 	// be compared against a recording of the reference machine.
 	const wavRate = 44100
