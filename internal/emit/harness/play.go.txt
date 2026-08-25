@@ -54,6 +54,10 @@ func main() {
 	rec := flag.String("rectape", "", "record what is pressed, one byte a "+
 		"frame, and write it here on exit. Replay it with msxrun -btape "+
 		"to reproduce a session exactly")
+	sndCart := flag.String("sndcart", "", "put a Konami sound cartridge in "+
+		"a slot: \"scc\" or \"scc+\". A game with no cartridge of its "+
+		"own -- one booted from a disk -- reaches the chip this way, "+
+		"and looks for it in the slot the hardware left free")
 	hz := flag.Int("hz", 60, "the machine's vertical frequency: 60 for a "+
 		"Japanese or American MSX, 50 for a European one. It sets both "+
 		"the rate the machine is driven at and what the cartridge is "+
@@ -73,6 +77,20 @@ func main() {
 		die(fmt.Errorf("-hz must be 50 or 60, not %d", *hz))
 	}
 	m.Hz = *hz
+	switch *sndCart {
+	case "":
+	case "scc":
+		if err := m.SoundCartIn(2, false); err != nil {
+			die(err)
+		}
+	case "scc+":
+		if err := m.SoundCartIn(2, true); err != nil {
+			die(err)
+		}
+	default:
+		die(fmt.Errorf("-sndcart wants %q or %q, not %q",
+			"scc", "scc+", *sndCart))
+	}
 	if err := z80.Cartridge.Start(m, z80.Base); err != nil {
 		die(err)
 	}
@@ -345,8 +363,12 @@ func (g *game) Draw(screen *ebiten.Image) {
 	// Manbow's intro is 192 and its stages are 212. So the texture follows
 	// the image rather than assuming.
 	h := img.Bounds().Dy()
-	if g.img == nil || g.img.Bounds().Dy() != h {
-		g.img = ebiten.NewImage(z80.ScreenWidth, h)
+	// The width follows the image for the same reason the height does:
+	// SCREEN 6 and SCREEN 7 are 512 dots across, and a texture made 256
+	// wide is handed twice the pixels it has room for.
+	w := img.Bounds().Dx()
+	if g.img == nil || g.img.Bounds().Dy() != h || g.img.Bounds().Dx() != w {
+		g.img = ebiten.NewImage(w, h)
 	}
 	g.img.WritePixels(img.Pix)
 	if !g.border {
@@ -365,13 +387,17 @@ func (g *game) Draw(screen *ebiten.Image) {
 
 func (g *game) Layout(int, int) (int, int) {
 	if g.border {
-		return z80.FrameWidth, z80.FrameHeight
+		// The surround keeps its width either side of the picture,
+		// so a wide screen widens the frame rather than being
+		// squeezed into it.
+		return g.rend.Width() + z80.FrameWidth - z80.ScreenWidth,
+			z80.FrameHeight
 	}
 	h := z80.ScreenHeight
 	if g.rend.Lines() > h {
 		h = g.rend.Lines()
 	}
-	return z80.ScreenWidth, h
+	return g.rend.Width(), h
 }
 
 // sampleRate is what the audio context runs at.

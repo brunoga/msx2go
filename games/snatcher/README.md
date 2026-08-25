@@ -117,6 +117,70 @@ which needs the Nextor interface ROM. Attach the image read-only or work
 from a copy: the game creates its save file on first run, and an
 emulator given the real image will write to it.
 
+## The sound cartridge
+
+Snatcher shipped with one -- Konami's RA-004, an SCC+ -- and its options
+screen has lines for `Audio` and `Slot`. Neither is a choice. The game
+probes, and the lines report what it found: with no cartridge, `PSG` and
+`-`; with a plain SCC, `SCC` and the slot; with the RA-004, `SCC+` and the
+slot. Measured on the reference three times, changing only the extension.
+
+The chip this machine already had was a feature of a *mapper*: bank 3Fh in
+page two turns a Konami cartridge's ROM into registers, so the game that
+has one is the game that carries it. A disk game carries nothing.
+`internal/emit/runtime/sndcart.go` is the other way round -- a cartridge
+that is nothing but the chip, in the one slot this machine leaves empty.
+`-sndcart scc` or `-sndcart scc+`, on msxrun and on the window alike.
+
+Three things the game's probe insists on, each of which had to be got right
+before it would admit the cartridge existed:
+
+- **Only slot two is free.** Zero is the BIOS, one is the disk ROM the game
+  finds DSKIO through, three is RAM. A cartridge in slot one does not fail
+  loudly; it just stops booting. So that is refused.
+- **Banking a window away hides the registers rather than wiping them.** The
+  probe writes a byte, banks the window away, writes again where it used to
+  be, banks back, and expects the first byte still to be there.
+- **The mode register is in neither window.** It sits at the top of the
+  cartridge and answers whatever bank is selected -- it has to, since it is
+  what opens the SCC-I's window in the first place. The game's very first
+  write to the cartridge is `BFFF <- 20`.
+
+The probe never writes port A8h itself. On the reference the `out (A8),a`
+happens inside the BIOS's stub in RAM at F380h, reached through WRSLT and
+ENASLT, and those are shimmed here -- so it is the shims that had to learn
+about the cartridge, not just the port.
+
+## One byte, and a whole screen
+
+The options screen was wrong for a long time in a way that read as
+corruption: the logo two pixels to the left, and every character of text
+carrying a sliver of its neighbour.
+
+It was not the rasteriser. Rendering the *reference machine's* own video
+memory through it gives a clean, correctly placed picture, so what was wrong
+was what this machine wrote. And nothing wrote it through the data port --
+nor through any BIOS call. The artwork arrives in **two HMMC transfers
+before the first frame is over**, and an HMMC's bytes go in through register
+44, which is why watching the data port saw nothing, and why a window that
+opens at a frame number sees nothing either. `-vwall` and `-regall` count
+from power-on for that reason.
+
+The rule is that a transfer into video memory takes its **first** byte from
+register 44, which the program loaded *before* it wrote the command. This
+machine waited for the next write instead, and so ran one byte behind for
+the whole rectangle. The text was mangled rather than merely shifted because
+the game blits it as 8x10 cells out of a font strip that was itself two
+pixels out of register: every cell picked up two columns of the next glyph
+and lost two of its own.
+
+Two counts say the fix is right and not merely better. Snatcher feeds
+exactly 10800 bytes, which is 142x40 and 256x20 -- both rectangles to the
+byte. Breaker, which uses LMMC rather than HMMC, writes register 44 with no
+transfer running exactly as many times as it issues other commands, so it
+has no surplus byte either. Breaker's frame digests move, because its load
+path changes; that is the fix rather than a regression.
+
 ## Where it gets to
 
 Boots through MSX-DOS, renders its options menu in SCREEN 7, takes the
@@ -125,3 +189,27 @@ for disk 2 and loads it, and reaches JUNKER HQ with its command menu
 waiting for input. The title screen is 99.83% of the visible page
 byte-identical to the reference machine's, the same 3741 white bytes to
 the byte.
+
+Run it as the 50Hz machine the reference is -- `-hz 50`, which is also what
+stops the game running a fifth too fast -- and **the whole visible screen is
+byte-identical to the reference's**: eighty-nine lines of picture, not one of
+them differing. What is left over sits below line 212, off the screen.
+
+Three of the registers behind that were the BIOS's rather than the game's,
+and each was wrong here in a way nothing showed until a screen was compared
+whole:
+
+- **A bitmap screen is 212 lines.** Register 9's LN bit, which the reference
+  sets the moment the game asks for SCREEN 7 and this machine never set. A
+  192-line window on a 212-line picture loses twenty lines off the bottom.
+- **Register 7 is the border colour**, taken from BDRCLR -- not the
+  foreground-and-background pair it is in a text mode. This machine wrote
+  zero and got a black border where the reference has blue.
+- **Registers 3 and 4 are a colour table a bitmap screen has not got**, and
+  the real BIOS leaves them exactly where the previous screen put them. They
+  are the one thing still differing, because the console before them is 80
+  columns on the reference and is not here; nothing reads them in SCREEN 7.
+
+The frequency bit in register 9 is the machine's own and is left alone, which
+is what `-hz 50` sets. Breaker gains by the same three rules: nine of its ten
+low registers now match the reference where seven did.
