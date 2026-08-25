@@ -371,33 +371,48 @@ func (g *game) Draw(screen *ebiten.Image) {
 		g.img = ebiten.NewImage(w, h)
 	}
 	g.img.WritePixels(img.Pix)
+
+	// A dot is not a square, and in the wide modes it is not even the same
+	// shape as in the narrow ones. SCREEN 6 and SCREEN 7 put 512 dots
+	// across the *same* piece of glass that SCREEN 5 puts 256 across, so
+	// the dots are half as wide -- the picture does not get wider. Drawing
+	// a 512-dot mode into a wider frame is what made it look stretched
+	// beside a real machine.
+	//
+	// So the layout is one fixed size, two of everything: 512 dots and
+	// twice the lines, whatever mode is running. A narrow picture is drawn
+	// at double width into it and a wide one at single, and both come out
+	// the shape the hardware makes them. It is the size openMSX settles on
+	// for the same reason.
+	sx := float64(z80.ScreenWidthWide) / float64(w)
+	var op ebiten.DrawImageOptions
+	op.GeoM.Scale(sx, 2)
 	if !g.border {
-		screen.DrawImage(g.img, nil)
+		screen.DrawImage(g.img, &op)
 		return
 	}
 	// The surround the hardware draws, in the colour register 7 is set to
 	// right now -- games change it, and some flash it, so it is read every
 	// frame rather than once.
 	screen.Fill(g.m.VDP.BorderRGBA())
-	var op ebiten.DrawImageOptions
-	op.GeoM.Translate(z80.BorderLeft, float64((z80.FrameHeight-h)/2))
+	op.GeoM.Translate(z80.BorderLeft*2, float64(z80.FrameHeight-h)) // (F-h)/2, doubled
 	screen.DrawImage(g.img, &op)
 	_ = image.Rect
 }
 
+// Layout is the same size whatever mode is running: wide enough for the most
+// dots any mode has, and twice the lines. See Draw -- a wide mode has smaller
+// dots, not a bigger picture, and a layout that grew with the dot count told
+// ebiten to stretch the frame instead.
 func (g *game) Layout(int, int) (int, int) {
 	if g.border {
-		// The surround keeps its width either side of the picture,
-		// so a wide screen widens the frame rather than being
-		// squeezed into it.
-		return g.rend.Width() + z80.FrameWidth - z80.ScreenWidth,
-			z80.FrameHeight
+		return z80.FrameWidth * 2, z80.FrameHeight * 2
 	}
 	h := z80.ScreenHeight
 	if g.rend.Lines() > h {
 		h = g.rend.Lines()
 	}
-	return g.rend.Width(), h
+	return z80.ScreenWidthWide, h * 2
 }
 
 // sampleRate is what the audio context runs at.
