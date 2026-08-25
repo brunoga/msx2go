@@ -53,6 +53,13 @@ func main() {
 	trailFrom := flag.Int("trailfrom", -1, "start -trailout's trace the "+
 		"first time this address executes")
 	trailN := flag.Int("trailN", 200000, "how many addresses -trailout records")
+	// A trace that begins at the *first* time an address runs begins at the
+	// wrong place in a game with scenes: the routine that draws a character
+	// draws the menu's characters too. This holds the arming back until the
+	// scene being compared has been reached, so the trace starts at the same
+	// event on both machines rather than at the same address.
+	trailFromFrame := flag.Int("trailfromframe", 0, "with -trailfrom, ignore "+
+		"the address until this frame")
 	trailOut := flag.String("trailout", "", "write executed addresses here, "+
 		"one per line, from -trailfrom on")
 	bankwatch := flag.Int("bankwatch", -1, "report every bank switch of this "+
@@ -308,6 +315,9 @@ func main() {
 				prev(pc, banks)
 			}
 			if !armed {
+				if m.Frames() < *trailFromFrame {
+					return
+				}
 				armed = pc == uint16(*trailFrom)
 				if !armed {
 					return
