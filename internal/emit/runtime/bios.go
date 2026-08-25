@@ -113,12 +113,17 @@ func (m *M) bios(addr uint16) {
 
 	case 0x013B: // WSLREG  A -> the primary slot register
 		m.PrimarySlot = m.A
+		m.sndRepage()
 
 	case 0x000C: // RDSLT   A = slot, HL = address -> A
 		m.A = m.slotRead(m.A, m.HL())
 
 	case 0x0014: // WRSLT   A = slot, HL = address, E = value
-		if m.slotHas(m.A, m.HL()) {
+		// A sound cartridge is written by slot without ever being
+		// paged in, which is how Snatcher drives it. See sndcart.go.
+		if c := m.SndCart; c != nil && m.A&3 == c.Slot {
+			m.sndCartWrite(m.HL(), m.E)
+		} else if m.slotHas(m.A, m.HL()) {
 			m.wr(m.HL(), m.E)
 		}
 
@@ -128,6 +133,8 @@ func (m *M) bios(addr uint16) {
 		page := uint(m.H >> 6)
 		m.PrimarySlot = m.PrimarySlot&^(3<<(2*page)) |
 			(m.A&3)<<(2*page)
+		m.sndRepage()
+		m.sndRepage()
 	case 0x0041: // DISSCR  blank the display
 		m.VDP.Reg[1] &^= 0x40
 	case 0x0044: // ENASCR

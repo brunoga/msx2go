@@ -125,8 +125,13 @@ func TestSnapshotRejectsAnotherCartridge(t *testing.T) {
 //
 // bios0 is saved: it is page zero as the BIOS has it, taken once when the
 // system bytes are laid down, and a restore does not lay them down again.
+//
+// SndCart is saved, but only its state: whether a sound cartridge is in the
+// machine at all is the machine's shape, chosen by whoever ran it, the same
+// as the disk it booted from. A restore into a machine that has one puts the
+// bank registers, the paging and the RAM standing behind it back.
 func TestSnapshotCoversTheMachine(t *testing.T) {
-	const known = 110
+	const known = 111
 	if n := reflect.TypeOf(M{}).NumField(); n != known {
 		t.Errorf("M has %d fields, this test was written against %d. "+
 			"A new one may need adding to walk in snapshot.go.", n, known)

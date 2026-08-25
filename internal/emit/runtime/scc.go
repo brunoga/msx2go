@@ -20,8 +20,10 @@ const sccChannels = 5
 
 // SCC is the chip's state and its synthesiser.
 type SCC struct {
-	// Wave is the per-channel table. Four and five share table four.
-	Wave [4][32]int8
+	// Wave is the per-channel table. On a plain SCC four and five share
+	// table four; an SCC-I gives the fifth its own, which is the whole
+	// point of the part.
+	Wave [5][32]int8
 	// Freq is the twelve-bit period per channel, Vol the four-bit volume,
 	// and Enable a bit per channel.
 	Freq   [sccChannels]int
@@ -30,6 +32,16 @@ type SCC struct {
 
 	// Active says the mapper has the registers visible rather than ROM.
 	Active bool
+
+	// Plus says this is an SCC-I -- the RA-004 cartridge Snatcher shipped
+	// with -- rather than the SCC built into a Konami game cartridge.
+	// It has a fifth waveform of its own and a second set of registers.
+	Plus bool
+	// PlusMode says the mode register has swapped those second registers
+	// in. An SCC-I comes up answering as a plain SCC so that software
+	// written before it still works; a program that wants the extra
+	// waveform has to ask.
+	PlusMode bool
 
 	pos        [sccChannels]int
 	acc        [sccChannels]float64
@@ -56,37 +68,79 @@ const (
 	sccEnd  = 0xA000
 	// sccBank is the bank value that makes them appear.
 	sccBank = 0x3F
+
+	// An SCC-I puts its own registers in a different window, reached by a
+	// different bank, and has a mode register at the top of the cartridge
+	// that says which of the two is answering.
+	sccPlusBase = 0xB800
+	sccPlusEnd  = 0xC000
+	sccPlusBank = 0x80
+	sccModeReg  = 0xBFFE
+	// Bit five of the mode register is the one that swaps the registers
+	// over; the rest choose RAM modes this cartridge has no RAM for.
+	sccModePlus = 0x20
 )
 
-// waveOf is the table a channel plays. Four and five share one.
+// waveOf is the table a channel plays.
+//
+// The fifth channel is the one that differs: a plain SCC has it share the
+// fourth channel's table, and an SCC-I in its own mode gives it a fifth.
+// An SCC-I that has not been switched over still shares, because that is
+// what the software of the day expects to hear.
 func (s *SCC) waveOf(ch int) *[32]int8 {
 	if ch >= 4 {
+		if s.Plus && s.PlusMode {
+			return &s.Wave[4]
+		}
 		return &s.Wave[3]
 	}
 	return &s.Wave[ch]
 }
 
-// Write applies a write to the register window.
+// Write applies a write to the plain SCC's register window at 9800h.
 func (s *SCC) Write(addr uint16, v byte) {
 	off := int(addr) - sccBase
 	switch {
 	case off < 0x80: // the four waveform tables
 		s.Wave[off>>5][off&31] = int8(v)
 	case off < 0x8A: // five twelve-bit periods, low byte first
-		ch := (off - 0x80) >> 1
-		if (off-0x80)&1 == 0 {
-			s.Freq[ch] = s.Freq[ch]&0xF00 | int(v)
-		} else {
-			s.Freq[ch] = s.Freq[ch]&0x0FF | int(v&0x0F)<<8
-		}
-		// A period change restarts the walk through the table, which is
-		// what makes a sweep sound like a sweep rather than a stutter.
-		s.pos[ch], s.acc[ch] = 0, 0
+		s.period(off-0x80, v)
 	case off < 0x8F: // five volumes
 		s.Vol[off-0x8A] = v & 0x0F
 	case off == 0x8F:
 		s.Enable = v & 0x1F
 	}
+}
+
+// WritePlus applies a write to the SCC-I's own register window at B800h.
+//
+// It is the same block of registers with a fifth waveform inserted before
+// them, so everything after the tables sits 20h higher than on a plain SCC.
+func (s *SCC) WritePlus(addr uint16, v byte) {
+	off := int(addr) - sccPlusBase
+	switch {
+	case off < 0xA0: // five waveform tables, the fifth its own
+		s.Wave[off>>5][off&31] = int8(v)
+	case off < 0xAA:
+		s.period(off-0xA0, v)
+	case off < 0xAF:
+		s.Vol[off-0xAA] = v & 0x0F
+	case off == 0xAF:
+		s.Enable = v & 0x1F
+	}
+}
+
+// period sets half of one channel's twelve-bit period, low byte first.
+func (s *SCC) period(off int, v byte) {
+	ch := off >> 1
+	if off&1 == 0 {
+		s.Freq[ch] = s.Freq[ch]&0xF00 | int(v)
+	} else {
+		s.Freq[ch] = s.Freq[ch]&0x0FF | int(v&0x0F)<<8
+	}
+	// A period change restarts the walk through the table, which is what
+	// makes a sweep sound like a sweep rather than a stutter.
+	s.pos[ch], s.acc[ch] = 0, 0
 }
 
 // SetSampleRate tells the synthesiser what it is producing.

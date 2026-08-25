@@ -158,6 +158,14 @@ func (m *M) wr(a uint16, v byte) {
 		m.setBank(p, int(v))
 		return
 	}
+	// A sound cartridge showing in page two owns every address there: its
+	// registers, its bank registers, and the rest of it, which is ROM
+	// that is not there. See sndcart.go.
+	if m.SndCart != nil && m.SndCart.paged &&
+		a >= sndPage2Lo && a < sndPage2Hi {
+		m.sndCartWrite(a, v)
+		return
+	}
 	// And where the mapper has put the sound chip instead of ROM, a write
 	// there is a write to the chip. Mirrored into the address space as
 	// well, because its registers read back.

@@ -66,6 +66,10 @@ type M struct {
 	// SCC is the sound chip Konami put in the mapper, present only on a
 	// cartridge whose mapper says so. See scc.go.
 	SCC SCC
+	// SndCart is a sound cartridge in a slot, which is how a game with no
+	// cartridge of its own reaches that same chip. Nil unless one was put
+	// in. See sndcart.go.
+	SndCart *SoundCart
 
 	// Keys is the keyboard matrix as SNSMAT returns it: one byte per row,
 	// a 0 bit meaning pressed.
@@ -855,8 +859,11 @@ func (m *M) out(port, v byte) {
 
 	case 0xA8:
 		// The slots are a fiction here -- everything is already paged in
-		// -- but a consistent one, so the value reads back.
+		// -- but a consistent one, so the value reads back. The one
+		// slot that is not a fiction is a sound cartridge's: selecting
+		// it really does change what page two holds.
 		m.PrimarySlot = v
+		m.sndRepage()
 	case 0xAA:
 		m.ppiC = v
 	case 0xAB:

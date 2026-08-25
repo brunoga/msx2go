@@ -207,6 +207,30 @@ func (m *M) walk(s snapper) {
 		s.byte(&m.SCC.Vol[i])
 		s.int(&m.SCC.pos[i])
 	}
+	s.bool(&m.SCC.Plus)
+	s.bool(&m.SCC.PlusMode)
+
+	// And the sound cartridge in a slot, where there is one. Whether it is
+	// there at all is the machine's shape rather than its state, so a
+	// snapshot restores into a machine that already has one; what is saved
+	// is which windows it is showing and the RAM standing behind it.
+	has := m.SndCart != nil
+	s.bool(&has)
+	if s.reading() && has && m.SndCart == nil {
+		m.SndCart = &SoundCart{}
+	}
+	if has {
+		c := m.SndCart
+		s.byte(&c.Slot)
+		s.bool(&c.Plus)
+		s.byte(&c.bank[0])
+		s.byte(&c.bank[1])
+		s.byte(&c.mode)
+		s.bool(&c.paged)
+		s.bytes(c.sccRegs[:])
+		s.bytes(c.plusRegs[:])
+		s.bytes(c.under[:])
+	}
 
 	// Timing. irqTaken carries the debt of a handler that overran its
 	// frame, so a snapshot that dropped it would resume a machine that had
