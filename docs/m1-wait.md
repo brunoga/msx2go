@@ -104,28 +104,27 @@ some digests should move *toward* the reference rather than away.
 
 ## Why it is not the four times
 
-Snatcher's intro runs about four times too fast, and this is not the cause.
+Snatcher's opening ran about four times too fast, and this was not the cause.
 
-The arithmetic says so — 15% is not 300% — but there is a better reason than
-arithmetic, because a small error can in principle be amplified by a game that
-paces itself on how much work it gets through. Measured instead, with `-cpu`,
-which scales the frame budget and so stands in for instructions costing more:
+The arithmetic says so -- 15% is not 300% -- but the arithmetic is weak on its
+own, because a game that paces itself on how much work it gets through can
+amplify a small error. The cause was found instead, and it was not a cycle
+cost at all: `mainThreadFrame` marked the interrupt clock *after* the handler
+returned rather than before it ran, so the handler's own `ei` let a second
+interrupt land on top of the first. The opening ran its handler four to six
+times a frame. See the test in `internal/emit/runtime/frame_test.go`.
 
-| `-cpu` | intro music |
-|---|---|
-| 1.0 | 6.6s |
-| 0.87 | 5.3s |
-| 0.7 | 5.3s |
-| 0.5 | 4.0s |
-| *reference* | *32s* |
+With that fixed, the opening's longest scene takes 37.5 seconds against the
+reference machine's 39.1 -- within 4% -- so there is no four times left for a
+15% instruction cost to explain.
 
-**A slower processor makes the intro shorter, not longer.** Whatever paces
-that sequence, it is not how much work fits in a frame, so making instructions
-dearer cannot lengthen it — and there is no feedback loop to amplify the 15%
-either. A slower machine appears to *skip* intro content rather than stretch
-it, which is its own open question.
+**An earlier version of this document argued the point from a `-cpu` table,
+and that table was wrong.** It was recorded from a run with no keyboard input,
+which leaves Snatcher sitting on its options screen: the numbers described a
+static menu, not the opening. Any conclusion drawn from them, including "a
+slower processor makes the intro shorter", is withdrawn. Measuring this game
+means pressing 0 first; `-tape` does it.
 
-So this is worth doing on its own terms: it is a real property of the machine,
-it is measured twice, and it makes every cycle comparison against the
-reference honest. It should not be committed as though it fixed Snatcher, and
-now there is a measurement rather than an argument saying it will not.
+So the M1 wait is worth doing on its own terms: it is a real property of the
+machine, it is measured twice, and it makes every cycle comparison against the
+reference honest. It should not be committed as though it fixed Snatcher.

@@ -213,3 +213,37 @@ whole:
 The frequency bit in register 9 is the machine's own and is left alone, which
 is what `-hz 50` sets. Breaker gains by the same three rules: nine of its ten
 low registers now match the reference where seven did.
+
+## The opening, and one interrupt a frame
+
+The opening ran about four times too fast: the typing, the music and the
+scene changes all together. It was not a cycle cost, and it was not this
+game's -- **the handler was being entered four to six times a frame, nested
+three deep.**
+
+`mainThreadFrame` marked the interrupt clock after the handler returned rather
+than before it ran. So for the whole of the handler's run, the mark still held
+the previous frame's value -- by then a full budget in the past, because a
+handler that costs more than a frame is ordinary. The handler's own `ei` was
+all `dueIRQ` needed to deliver a second interrupt on top of the first, and
+another every budget after that. `runFrame`, the frame engine for cartridges,
+has always set the mark before running the handler; this is the same rule for
+the shape a disk game boots into.
+
+Measured against the reference by the game's own disk reads, which are
+landmarks nothing else can fake -- thirty-eight of them, identical in content
+and order on both machines:
+
+| | ours before | ours after | reference |
+|---|---|---|---|
+| longest scene | 7.8s | 37.5s | 39.1s |
+
+Within 4%, at `-hz 50`. What is left is the reads themselves: a block read
+costs this machine almost nothing and costs a real SunriseIDE a quarter of a
+second, so every loading pause is still shorter here than on the reference.
+
+**How not to measure this game.** With no keyboard input it stops on the
+options screen and stays there for ever, playing the menu's music -- which
+looks enough like the opening to be mistaken for it. A whole round of
+measurements was taken that way and every one of them was of a static menu.
+Press 0 first: `-tape` will.

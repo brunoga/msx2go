@@ -336,6 +336,17 @@ func (m *M) mainThreadFrame() error {
 	// leaves the machine in the middle of an interrupt and the game
 	// showing nothing at all. Neither limit belongs to the handler.
 	m.cycLimit = 0
+	// The clock owes no interrupt until the end of this frame, and it stops
+	// owing one the moment this frame's is taken -- not when the handler
+	// finishes. Marking it afterwards left lastIRQ holding the *previous*
+	// frame's value for the whole of the handler's run, already a full
+	// budget in the past, so the first `ei` the handler executed made
+	// dueIRQ deliver a second interrupt on top of the first. Snatcher's
+	// intro ran its handler four to six times a frame, nested three deep,
+	// and got through four times its work: the typing, the music and the
+	// scene changes all ran at four times their speed. See dueIRQ, whose
+	// budget test this is the other half of.
+	m.lastIRQ = frameStart + m.FrameCycles()
 	m.armLine(frameStart)
 	if entry, ok := m.InterruptEntry(); ok {
 		if m.IFF && m.nest < maxNest {
@@ -358,7 +369,6 @@ func (m *M) mainThreadFrame() error {
 			m.fHeld = true
 		}
 	}
-	m.lastIRQ = frameStart + m.FrameCycles()
 	m.cycLimit = frameStart + m.FrameCycles()
 	m.idle, m.halted = false, false
 	for {
