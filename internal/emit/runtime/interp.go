@@ -654,19 +654,12 @@ func (m *M) stepCB(pfx int) {
 	n := int(op>>3) & 7
 	switch {
 	case pfx != 0:
-		// A prefixed CB is 23 T-states, except that `bit n,(ix+d)` is
-		// 20. The emitter cannot tell those apart -- the decoder carries
-		// the prefix as the instruction and not the operation byte after
-		// the displacement -- so neither does this, and both charge 23.
-		// Twelve are already on the meter from the prefix and the
-		// displacement.
-		m.tick(11)
-	case i == 6 && op >= 0x40 && op < 0x80: // bit n,(hl)
-		m.tick(12)
-	case i == 6:
-		m.tick(15)
+		// The prefix and the displacement are already on the meter --
+		// cycPrefix and cycIndex -- so what is left is the rest of the
+		// instruction and the two fetches cycPrefix did not cover.
+		m.tick(uint32(cycCBIndexed) - cycPrefix - cycIndex)
 	default:
-		m.tick(8)
+		m.tick(uint32(cycCB(op)))
 	}
 
 	get := func() byte {

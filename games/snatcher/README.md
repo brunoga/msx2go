@@ -267,3 +267,59 @@ options screen and stays there for ever, playing the menu's music -- which
 looks enough like the opening to be mistaken for it. A whole round of
 measurements was taken that way and every one of them was of a static menu.
 Press 0 first: `-tape` will.
+
+## The shims, priced
+
+Three of the four things that pace this game are now measured rather than
+guessed. The fourth is the disk, and it is still free.
+
+**The M1 wait state.** An MSX inserts a wait into every opcode fetch, and this
+machine charged data-sheet timings. It charges the wait now; see
+`docs/m1-wait.md`.
+
+**The BIOS entries.** The costs a shim charges for the routine it stands for
+were round numbers, and wrong in both directions by as much as three times.
+They were measured on the reference machine -- breakpoint the entry, breakpoint
+its return with the stack back where it started, take the median -- across five
+cartridges and this game:
+
+| entry | calls sampled | real | was charged |
+|---|---|---|---|
+| SNSMAT | 65466 | 86 | 180 |
+| WRTPSG | 12992 | 84 | 90 |
+| WRTVRM | 6817 | 223 | 80 |
+| RDPSG | 2541 | 46 | 90 |
+| RDVDP | 2005 | 34 | 40 |
+| SETWRT | 1149 | 119 | 60 |
+| RDVRM | 1080 | 192 | 80 |
+| LDIRVM | 990 | 275 + 57/byte | 70 + 26/byte |
+| FILVRM | 25 | 700 + 29/byte | 70 + 26/byte |
+
+SNSMAT is worth a second look: 86 is a `jp` and nine instructions, and adding
+those up *with the M1 wait* gives 86 exactly. The wait and this table confirm
+each other. It matters here because this game calls SNSMAT about 140 times a
+frame during its opening -- charging 180 for it was a fifth of the frame on its
+own.
+
+Entries nothing sampled -- RDSLT, WRSLT, ENASLT, RSLREG, WSLREG -- keep the
+numbers they had, marked as unmeasured rather than given a measured-looking
+value.
+
+## What is still wrong
+
+The opening's longest scene now takes 44.8s against the reference's 39.1,
+where before any of this it took 7.8. It is 15% too *slow*, and the mechanism
+is known: the scene is paced by interrupts, and 22% of its frames are skipped
+because the work no longer fits in one. Per interrupt this machine spends
+about 89,000 cycles where a frame is 71,591 and the reference fits inside it.
+
+So something here still over-charges by about a quarter, and it is not the M1
+wait or the BIOS entries -- both are now measured. The thread to pull is the
+VDP and screen shims, which a SCREEN 7 game leans on harder than anything
+else.
+
+And the disk is still free. A block read costs a real SunriseIDE and its
+Nextor kernel 10 to 108 milliseconds -- about 20ms fixed plus 5.3us a byte,
+fitted over 46 calls -- and costs a shim nothing. That is 3.8 seconds of the
+opening the reference spends and this machine does not, and it is why the
+loading pauses are still short here.

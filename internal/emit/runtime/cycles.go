@@ -30,9 +30,33 @@ import (
 // the PSG's Clock, which is the same crystal divided.
 const CPUClock = 3579545
 
+// cycM1Wait is the wait state an MSX inserts into every M1 cycle -- every
+// opcode fetch. The VDP and the processor share the memory bus, and the
+// machine buys the processor out of the way for one T-state a fetch, so a
+// real MSX Z80 runs about 15% slower than a Z80 data sheet says.
+//
+// It is charged per *fetch*, so an instruction pays it once for its opcode and
+// again for each prefix byte: one for an unprefixed instruction, two behind
+// CB, DD, ED or FD, three behind DD CB.
+//
+// Measured on the reference machine twice, by different methods. Snatcher's
+// hottest loop at 5798h costs 90.85 cycles an iteration where the data-sheet
+// figure is 76 and the twelve M1 cycles make it 88, the rest being a
+// conditional call taken on some passes. And the last byte of an `otir` to the
+// VDP data port costs 18 where the data sheet says 16, `otir` being
+// ED-prefixed and so two fetches. That second measurement also rules out any
+// further VDP access-slot stall on the data port: a byte written to port 98h
+// in SCREEN 7 with the display on costs what the instruction costs and no
+// more. See docs/m1-wait.md.
+const cycM1Wait = 1
+
 // cycBase is the cost of each unprefixed opcode, taking the *untaken* side of
 // any conditional. CB, DD, ED and FD are prefixes and cost nothing here; their
 // tables charge the whole instruction.
+//
+// The numbers written out below are the data sheet's, so that they can be
+// checked against it; init adds the M1 wait to each, which is the one thing
+// that makes them an MSX's rather than a bare Z80's.
 var cycBase = [256]uint16{
 	// 0x00
 	4, 10, 7, 6, 4, 4, 7, 4, 4, 11, 7, 6, 4, 4, 7, 4,
@@ -59,6 +83,24 @@ var cycBase = [256]uint16{
 	5, 10, 10, 4, 10, 11, 7, 11, 5, 6, 10, 4, 10, 0, 7, 11,
 }
 
+// The M1 wait is folded into the table rather than added at the two places
+// that charge for an instruction. Those two -- the interpreter and the cost
+// the emitter bakes into generated code -- have to agree exactly or a
+// translated build stops matching its interpreted twin, which is the check
+// this whole project rests on. Adding it in one place makes disagreeing
+// impossible.
+//
+// The four prefix entries are left alone: they are zero because their own
+// tables charge the whole instruction, and cycCB, cycED and cycPrefix carry
+// the fetches those instructions really make.
+func init() {
+	for i := range cycBase {
+		if cycBase[i] != 0 {
+			cycBase[i] += cycM1Wait
+		}
+	}
+}
+
 // A taken conditional costs more than an untaken one -- five more for a jr,
 // six for a ret, seven for a call -- and neither the interpreter nor the
 // translated code charges it.
@@ -79,14 +121,35 @@ var cycBase = [256]uint16{
 // Prefix and index costs. A DD or FD prefix is one extra fetch; reaching for
 // (IX+d) instead of (HL) costs the displacement fetch and the addition.
 const (
-	cycPrefix = 4
+	cycPrefix = 4 + cycM1Wait
 	cycIndex  = 8
 )
+
+// cycCB is what a CB-prefixed instruction costs, both fetches included. The
+// interpreter and CycleCost both go through here so that they cannot drift.
+func cycCB(sub byte) uint16 {
+	if sub&7 == 6 {
+		if sub >= 0x40 && sub < 0x80 {
+			return 12 + 2*cycM1Wait // bit n,(hl)
+		}
+		return 15 + 2*cycM1Wait
+	}
+	return 8 + 2*cycM1Wait
+}
+
+// cycCBIndexed is a DD CB or FD CB instruction: three fetches, and the
+// displacement and the addition on top. `bit n,(ix+d)` is really 20 rather
+// than 23, but the decoder carries the prefix as the instruction rather than
+// the operation byte after the displacement, so neither charge point can tell
+// those apart and both charge the same.
+const cycCBIndexed = 23 + 3*cycM1Wait
 
 // cycED is the cost of each ED-prefixed opcode, prefix included. The block
 // instructions are charged per iteration in interp.go; the entry here is one
 // pass. Undefined codes are two-byte no-ops.
-func cycED(sub byte) uint16 {
+func cycED(sub byte) uint16 { return cycEDRaw(sub) + 2*cycM1Wait }
+
+func cycEDRaw(sub byte) uint16 {
 	switch sub {
 	case 0x43, 0x53, 0x63, 0x73, 0x4B, 0x5B, 0x6B, 0x7B: // ld (nn),dd / ld dd,(nn)
 		return 20
@@ -121,7 +184,7 @@ func cycED(sub byte) uint16 {
 // 16. Charging the difference instead of the whole thing undercounts an OTIR
 // of a hundred bytes by sixteen hundred cycles, and a handler that pushes
 // sprites to video memory that way then looks three times cheaper than it is.
-const cycBlockRepeat = 21
+const cycBlockRepeat = 21 + 2*cycM1Wait
 
 // cycHalt is what a halted processor costs per step: it fetches nothing and
 // the clock runs on, four T-states at a time, until an interrupt arrives.
@@ -706,27 +769,63 @@ const cycVRAMByte = 26
 // These are rounded from the C-BIOS implementations. Exactness is not the
 // point -- what matters is that calling the BIOS costs something, because a
 // game whose handler overruns a frame does so largely through these.
+// The measured entries below were taken on the reference machine with a real
+// MSX2 BIOS, by breakpointing the entry and again at its return address with
+// the stack back where it started, across five cartridges and Snatcher: the
+// median of every call, which throws out the passes an interrupt landed
+// inside. The counts are in the comments. They replace a set of round numbers
+// that were wrong in both directions and by as much as three times -- SNSMAT
+// was charged 180 for a routine that costs 86, and it is called about 140
+// times a frame during Snatcher's opening, which by itself was a fifth of the
+// frame.
+//
+// SNSMAT's 86 is worth reading twice: it is `jp` plus nine instructions, and
+// adding those up with the M1 wait gives 86 exactly. The wait and this
+// measurement confirm each other.
+//
+// Entries with no sample are left at what they were and marked, rather than
+// having a measured-looking number invented for them.
 func biosCost(addr uint16) uint16 {
 	switch addr {
-	case 0x0141: // SNSMAT: selects a row on the PSG and reads it back
-		return 180
-	case 0x0093, 0x0096: // WRTPSG, RDPSG
-		return 90
-	case 0x0047: // WRTVDP
-		return 90
-	case 0x004A, 0x004D: // RDVRM, WRTVRM: set the address, then one byte
-		return 80
-	case 0x0050, 0x0053: // SETRD, SETWRT
-		return 60
-	case 0x0056, 0x0059, 0x005C: // the block routines, before their bytes
-		return 70
-	case 0x000C, 0x0014, 0x0024: // RDSLT, WRSLT, ENASLT: slot arithmetic
+	case 0x0141: // SNSMAT, 65466 calls
+		return 86
+	case 0x0093: // WRTPSG, 12992 calls
+		return 84
+	case 0x0096: // RDPSG, 2541 calls
+		return 46
+	case 0x0047: // WRTVDP, 25 calls
+		return 185
+	case 0x004A: // RDVRM, 1080 calls
+		return 192
+	case 0x004D: // WRTVRM, 6817 calls
+		return 223
+	case 0x0050, 0x0053: // SETRD, SETWRT -- 1149 calls, all of SETWRT;
+		// SETRD is the same routine pointed the other way.
+		return 119
+	case 0x013E: // RDVDP, 2005 calls
+		return 34
+	case 0x005C, 0x0059: // LDIRVM, 990 calls; LDIRMV is its mirror.
+		return 275 // and cycLdirVMByte a byte
+	case 0x0056: // FILVRM, 25 calls of five different lengths
+		return 700 // and cycFilVMByte a byte
+	case 0x000C, 0x0014, 0x0024: // RDSLT, WRSLT, ENASLT: not measured --
+		// nothing in the battery calls them often enough to sample.
 		return 200
-	case 0x0138, 0x013B, 0x013E: // RSLREG, WSLREG, RDVDP
+	case 0x0138, 0x013B: // RSLREG, WSLREG: not measured
 		return 40
 	}
-	return 50
+	return 50 // not measured
 }
+
+// What a byte of a BIOS block transfer costs, fitted by least squares over the
+// calls measured above -- lengths from 24 to 768 bytes, so the fixed part and
+// the per-byte part separate cleanly. A copy costs about twice a fill because
+// it reads a byte as well as writing one, and both cost far more than the bare
+// OUTI this machine used to charge for either.
+const (
+	cycLdirVMByte = 57 // LDIRVM, LDIRMV
+	cycFilVMByte  = 29 // FILVRM, BIGFIL
+)
 
 // CycleCost is what one decoded instruction costs, for code that is translated
 // rather than interpreted. op is the opcode or the prefix, sub the byte after
@@ -743,18 +842,12 @@ func biosCost(addr uint16) uint16 {
 func CycleCost(op, sub byte) uint32 {
 	switch op {
 	case 0xCB:
-		if sub&7 == 6 {
-			if sub >= 0x40 && sub < 0x80 {
-				return 12 // bit n,(hl)
-			}
-			return 15
-		}
-		return 8
+		return uint32(cycCB(sub))
 	case 0xED:
 		return uint32(cycED(sub))
 	case 0xDD, 0xFD:
 		if sub == 0xCB {
-			return 23
+			return cycCBIndexed
 		}
 		n := uint32(cycPrefix) + uint32(cycBase[sub])
 		if usesIndex(sub) {

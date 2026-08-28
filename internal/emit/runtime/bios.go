@@ -44,8 +44,10 @@ func (m *M) bios(addr uint16) {
 	// instantly is not merely fast, it is a machine on which the game was
 	// never tuned. See cycles.go.
 	switch addr {
-	case 0x0056, 0x0059, 0x005C:
-		m.tick(uint32(m.BC()) * cycVRAMByte)
+	case 0x0056:
+		m.tick(uint32(m.BC()) * cycFilVMByte)
+	case 0x0059, 0x005C:
+		m.tick(uint32(m.BC()) * cycLdirVMByte)
 	}
 	if biosEnablesInterrupts[addr] {
 		m.IFF = true
@@ -436,7 +438,7 @@ func (m *M) bios(addr uint16) {
 		// a copy source. Breaker fills alternating lines of 00h and FFh
 		// with it, 128 bytes a call.
 		n := int(m.BC())
-		m.tick(uint32(n) * cycVRAMByte)
+		m.tick(uint32(n) * cycFilVMByte)
 		for i := 0; i < n; i++ {
 			m.vramWrite(m.vramBase()+int(m.HL())+i, m.A)
 		}

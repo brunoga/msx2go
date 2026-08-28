@@ -3,7 +3,8 @@
 An MSX does not run a Z80 at Z80 speed. The VDP and the CPU share the memory
 bus, and the machine inserts **one wait state into every M1 cycle** — every
 opcode fetch. A real MSX Z80 is therefore about 15% slower than the timings in
-a Z80 data sheet, and msx2go charges the data-sheet numbers.
+a Z80 data sheet. msx2go charges it, as of the commit this document was
+rewritten in; what follows is the measurement it rests on and what it moved.
 
 ## Measured, not assumed
 
@@ -45,86 +46,79 @@ extra VDP access-slot stall** on the data port beyond the M1 wait. A byte
 written to port 98h in SCREEN 7 with the display on costs what the
 instruction costs, and no more.
 
-## What has to change
+## How it is charged
 
-M1 cycles per instruction are not in any table today; they follow from the
-prefix, so no new table is needed:
+The wait belongs to the *fetch*, so an instruction pays one for its opcode and
+one more for each prefix byte:
 
-| form | M1 cycles |
+| form | fetches |
 |---|---|
 | unprefixed | 1 |
 | `CB`, `ED`, `DD`, `FD` | 2 |
 | `DD CB`, `FD CB` | 3 |
 
-Two places charge for an instruction, and both must agree or the translated
-build stops matching the interpreted one — which is the check the whole
-project rests on:
+Two places charge for an instruction, and they must agree exactly or a
+translated build stops matching its interpreted twin -- the check this whole
+project rests on. So neither of them adds the wait: it is folded into the
+tables both read, by an `init` over `cycBase` and into `cycPrefix`, `cycED` and
+`cycCB`. `cycCB` is new; the CB costs used to be written out twice, once in the
+interpreter and once in `CycleCost`, and folding a wait into two copies of the
+same numbers is exactly how the two drift apart.
 
-- `internal/emit/runtime/interp.go` — `m.tick(uint32(cycBase[op]))` at the top
-  of `step`, `m.tick(cycPrefix)` for a prefix byte, and `m.tick(uint32(cycED(op)))`
-  in the ED path.
-- `internal/emit/runtime/cycles.go` — `CycleCost(op, sub)`, which the emitter
-  bakes into generated code (`internal/emit/file.go`, `banked.go`, `chunked.go`).
+A repeating block instruction is fetched again for every pass, so
+`cycBlockRepeat` carries two waits as well.
 
-The tidiest change is to fold the wait into `cycBase`, `cycED` and `cycPrefix`
-themselves rather than adding it at every call site: one wait for the base
-opcode, one more for a prefix. Then neither charge point changes at all, and
-there is no way for the two to drift apart.
+`cycHalt` does not. A halted Z80 does keep running M1 cycles, so it probably
+should -- but it was not measured, and the halt loop only pads out to the end
+of a frame, so the number does not reach anything. It is left alone and said
+so rather than guessed at.
 
-**A generated module carries the old costs.** `CycleCost` is evaluated at
-build time and written into the generated Go, so every existing module keeps
-whatever it was built with until it is regenerated. Any comparison of a
-translated build against its interpreted twin has to use a module built after
-the change.
+## What it moved
 
-## What it will disturb
+Nothing was regenerated: no generated module is checked in, so every build
+picks the new costs up.
 
-Every game's frame digests, because every instruction gets dearer. That is the
-point — but it means the battery cannot be rebaselined by simply accepting the
-new numbers.
+All eight battery titles moved, which was expected -- every instruction got
+dearer. None of them broke: the rendered frame at 600 is identical for King's
+Valley, Space Manbow and King's Valley Plus, and 96-100% identical for the
+rest, the differences being where an animated title screen had got to.
 
-Each of the eight titles has to be checked **against the reference**, not
-against its own previous digest:
+Against the reference, on the one game with a live comparison, the effect is
+mixed and worth writing down honestly. Measured on Snatcher's own disk reads:
 
-- `breaker`, `castleexcellent`, `kingsvalleyplus`, `salamander`,
-  `spacemanbow`, `spacemanbow-frs`, `kingsvalley`, `kv2`.
+| | opening | its longest scene |
+|---|---|---|
+| before | 51.5s (0.85x) | 42.1s (1.08x) |
+| with the M1 wait | 54.7s (0.90x) | 45.2s (1.16x) |
+| and measured shims | 54.3s (0.90x) | 44.8s (1.15x) |
+| *reference* | *60.6s* | *39.1s* |
 
-The games with a documented cycle-sensitive behaviour are the ones to look at
-first, because they are the ones a 15% change can visibly break:
+The opening gets closer and the scene gets further away. The scene is paced by
+interrupts, and 22% of its frames are now skipped because the work no longer
+fits in one -- so making instructions dearer stretches it. That says this
+machine over-charges Snatcher somewhere by about a quarter, and the M1 wait is
+not the place to fix it: the wait is measured, twice, and confirmed a third
+time by SNSMAT costing exactly what its nine instructions cost with the waits
+added. The next thread is the VDP and screen shims, which is what a SCREEN 7
+game leans on hardest.
 
-- **Salamander** — its handler is meant to overrun and eat the next interrupt;
-  its gameplay speed is the tell.
-- **Space Manbow** — its ISR polls S#1 for the raster and its splits are timed.
-- **Breaker** — the interrupt-driven half, whose translated and interpreted
-  digests must stay identical to each other.
+Space Manbow is the only battery title saturated enough for instructions per
+frame to mean anything, and there the wait moved it from 7918 to 7113 against
+the reference's 7524 -- from 5% over to 5% under. The 5% under is the size of
+the documented untaken-branch approximation, which is the other known gap in
+this model.
 
-Expect handlers that currently fit inside a frame to stop fitting. That is
-the hardware's behaviour, and several of these games were tuned for it, so
-some digests should move *toward* the reference rather than away.
+## Why it was not Snatcher's four times
 
-## Why it is not the four times
+Snatcher's opening once ran about four times too fast, and this was never the
+cause. The cause was `mainThreadFrame` marking the interrupt clock after the
+handler returned rather than before it ran, so the handler's own `ei` let a
+second interrupt land on top of the first; it ran its handler four to six times
+a frame. See `internal/emit/runtime/frame_test.go`.
 
-Snatcher's opening ran about four times too fast, and this was not the cause.
-
-The arithmetic says so -- 15% is not 300% -- but the arithmetic is weak on its
-own, because a game that paces itself on how much work it gets through can
-amplify a small error. The cause was found instead, and it was not a cycle
-cost at all: `mainThreadFrame` marked the interrupt clock *after* the handler
-returned rather than before it ran, so the handler's own `ei` let a second
-interrupt land on top of the first. The opening ran its handler four to six
-times a frame. See the test in `internal/emit/runtime/frame_test.go`.
-
-With that fixed, the opening's longest scene takes 37.5 seconds against the
-reference machine's 39.1 -- within 4% -- so there is no four times left for a
-15% instruction cost to explain.
-
-**An earlier version of this document argued the point from a `-cpu` table,
+**An earlier version of this document argued that point from a `-cpu` table,
 and that table was wrong.** It was recorded from a run with no keyboard input,
 which leaves Snatcher sitting on its options screen: the numbers described a
 static menu, not the opening. Any conclusion drawn from them, including "a
 slower processor makes the intro shorter", is withdrawn. Measuring this game
 means pressing 0 first; `-tape` does it.
-
-So the M1 wait is worth doing on its own terms: it is a real property of the
-machine, it is measured twice, and it makes every cycle comparison against the
-reference honest. It should not be committed as though it fixed Snatcher.
