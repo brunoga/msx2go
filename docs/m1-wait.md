@@ -104,8 +104,28 @@ some digests should move *toward* the reference rather than away.
 
 ## Why it is not the four times
 
-Snatcher's intro runs about four times too fast, and this is not the cause:
-15% is not 300%. It is worth fixing on its own terms — it is a real property
-of the machine, it is measured, and it makes every cycle comparison against
-the reference honest — but it should not be expected to fix that, and it
-should not be committed as though it had.
+Snatcher's intro runs about four times too fast, and this is not the cause.
+
+The arithmetic says so — 15% is not 300% — but there is a better reason than
+arithmetic, because a small error can in principle be amplified by a game that
+paces itself on how much work it gets through. Measured instead, with `-cpu`,
+which scales the frame budget and so stands in for instructions costing more:
+
+| `-cpu` | intro music |
+|---|---|
+| 1.0 | 6.6s |
+| 0.87 | 5.3s |
+| 0.7 | 5.3s |
+| 0.5 | 4.0s |
+| *reference* | *32s* |
+
+**A slower processor makes the intro shorter, not longer.** Whatever paces
+that sequence, it is not how much work fits in a frame, so making instructions
+dearer cannot lengthen it — and there is no feedback loop to amplify the 15%
+either. A slower machine appears to *skip* intro content rather than stretch
+it, which is its own open question.
+
+So this is worth doing on its own terms: it is a real property of the machine,
+it is measured twice, and it makes every cycle comparison against the
+reference honest. It should not be committed as though it fixed Snatcher, and
+now there is a measurement rather than an argument saying it will not.
