@@ -38,16 +38,16 @@ func (m *M) bios(addr uint16) {
 	if m.BiosTrace != nil {
 		m.BiosTrace(addr)
 	}
-	m.tick(uint32(biosCost(addr)))
+	m.tickShim(uint32(biosCost(addr)))
 	// The block routines are loops over bytes, and their cost is the whole
 	// reason a cartridge's handler overruns a frame. A shim that returns
 	// instantly is not merely fast, it is a machine on which the game was
 	// never tuned. See cycles.go.
 	switch addr {
 	case 0x0056:
-		m.tick(uint32(m.BC()) * cycFilVMByte)
+		m.tickShim(uint32(m.BC()) * cycFilVMByte)
 	case 0x0059, 0x005C:
-		m.tick(uint32(m.BC()) * cycLdirVMByte)
+		m.tickShim(uint32(m.BC()) * cycLdirVMByte)
 	}
 	if biosEnablesInterrupts[addr] {
 		m.IFF = true

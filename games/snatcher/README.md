@@ -305,21 +305,47 @@ Entries nothing sampled -- RDSLT, WRSLT, ENASLT, RSLREG, WSLREG -- keep the
 numbers they had, marked as unmeasured rather than given a measured-looking
 value.
 
-## What is still wrong
+## The disk, priced
 
-The opening's longest scene now takes 44.8s against the reference's 39.1,
-where before any of this it took 7.8. It is 15% too *slow*, and the mechanism
-is known: the scene is paced by interrupts, and 22% of its frames are skipped
-because the work no longer fits in one. Per interrupt this machine spends
-about 89,000 cycles where a frame is 71,591 and the reference fits inside it.
+A block read costs a real SunriseIDE and its Nextor kernel between 10 and 108
+milliseconds, and costs a shim nothing. Measured the same way as the BIOS
+entries -- breakpoint MSX-DOS's entry at 0005h and again at its return -- 46
+block reads of 512 to 16384 bytes fit **19.5ms of kernel work a call plus
+5.26us a byte**, and that fit reproduces the measured 1.75s total to the
+hundredth. Nearly a whole frame of fixed cost is not suspicious: a file read
+walks a FAT and a directory before it moves a byte. The other calls are priced
+by their own medians -- open 179657 cycles, close 19294, a find 159200.
 
-So something here still over-charges by about a quarter, and it is not the M1
-wait or the BIOS entries -- both are now measured. The thread to pull is the
-VDP and screen shims, which a SCREEN 7 game leans on harder than anything
-else.
+That took the opening from 0.90x of the reference to **0.95x**.
 
-And the disk is still free. A block read costs a real SunriseIDE and its
-Nextor kernel 10 to 108 milliseconds -- about 20ms fixed plus 5.3us a byte,
-fitted over 46 calls -- and costs a shim nothing. That is 3.8 seconds of the
-opening the reference spends and this machine does not, and it is why the
-loading pauses are still short here.
+It also broke King's Valley Plus, which was worth the lesson. That game loads a
+level with 67 block reads in a single frame, and once those cost what they
+really cost, the frame crossed `FrameRunaway` -- a hundred frames' worth of
+cycles -- and was abandoned as a loop with no way out. The screen stayed black
+for ever. The guard is looking for instructions going round in circles; a shim
+charging for a kernel it did not run is the opposite of that. Shim time no
+longer counts toward it. See `tickShim`.
+
+## Where it stands
+
+Measured on the game's own disk reads, thirty-eight of them, identical in
+content and order on both machines:
+
+| | opening | its longest scene |
+|---|---|---|
+| before any of this | 9.8s (0.16x) | 7.8s (0.20x) |
+| one interrupt a frame | 40.0s (0.66x) | 37.5s (0.96x) |
+| + the overrun paid back | 51.5s (0.85x) | 42.1s (1.08x) |
+| + the M1 wait | 54.7s (0.90x) | 45.2s (1.16x) |
+| + measured BIOS shims | 54.3s (0.90x) | 44.8s (1.15x) |
+| + measured disk | **57.7s (0.95x)** | 45.1s (1.16x) |
+| *reference* | *60.6s* | *39.1s* |
+
+The opening is within 5%. The scene is 16% too slow and went the wrong way as
+the cycle model got more honest, which is the open thread: it is paced by
+interrupts, 22% of its frames are skipped because the work no longer fits in
+one, and per interrupt this machine spends about 89,000 cycles where a frame is
+71,591 and the reference fits inside it. Something over-charges that scene by
+about a quarter. It is not the M1 wait, the BIOS entries or the disk -- all
+three are now measured -- which leaves the VDP and screen shims, the thing a
+SCREEN 7 game leans on hardest.

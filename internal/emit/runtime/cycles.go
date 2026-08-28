@@ -190,6 +190,18 @@ const cycBlockRepeat = 21 + 2*cycM1Wait
 // the clock runs on, four T-states at a time, until an interrupt arrives.
 const cycHalt = 4
 
+// tickShim charges cycles for work a shim stands in for rather than performs:
+// the disk kernel a disk call replaces, the loop a BIOS block routine
+// replaces. The clock moves the same as if the instructions had run, but the
+// frame's runaway guard must not see it, so the frame's start moves with it.
+// See FrameRunaway.
+func (m *M) tickShim(n uint32) {
+	m.tick(n)
+	if m.frameStart != 0 {
+		m.frameStart += uint64(n)
+	}
+}
+
 // tick charges cycles to the frame's budget. It takes a wide count because a
 // block instruction over a whole page costs far more than a byte's worth: an
 // LDIR of sixteen kilobytes is a third of a million T-states.
@@ -418,10 +430,17 @@ func (m *M) dueLine() {
 	}
 }
 
-// FrameRunaway is how many frames' worth of cycles one frame may spend before
-// the machine decides it is not coming back. A heavy frame costs three or four;
-// a level load can cost twenty. A hundred is not a slow frame, it is a loop
-// with no way out.
+// FrameRunaway is how many frames' worth of cycles one frame may spend
+// *executing* before the machine decides it is not coming back. A heavy frame
+// costs three or four. A hundred is not a slow frame, it is a loop with no way
+// out.
+//
+// Executing is the word that matters. Time a shim charges for work it did not
+// do -- a disk kernel walking a FAT, a BIOS block transfer -- is not counted,
+// because it is the opposite of a runaway: the clock moves and no instruction
+// runs. See tickShim. King's Valley Plus loads a level with 67 block reads in
+// one frame, and once those were charged what they really cost, that frame was
+// being abandoned as a loop and the game never drew again.
 //
 // Without cycle counting a translated program that gets stuck simply stops:
 // Run never returns, the harness never draws again, and the sound thread keeps
@@ -756,6 +775,58 @@ func (m *M) FrameCycles() uint64 {
 
 // Timed reports whether this machine charges for the time its work takes.
 func (m *M) Timed() bool { return m.CPUScale >= 0 }
+
+// What a disk call costs, in T-states.
+//
+// Measured on the reference machine -- a SunriseIDE with Nextor, which is what
+// Snatcher's hard disk needs -- by breakpointing MSX-DOS's entry at 0005h and
+// again at its return address with the stack back where it started. 46 block
+// reads of 512 to 16384 bytes fit 19.5ms of kernel work a call plus 5.26us a
+// byte by least squares, which at 3.58MHz is the two constants below, and that
+// fit reproduces the measured 1.75s total to the hundredth.
+//
+// The fixed part is nearly a whole frame, and that is real rather than
+// suspicious: a file read walks a FAT and a directory before it moves a byte.
+// A shim does none of it and used to charge nothing, which is 3.8 seconds of
+// Snatcher's opening that the reference spends and this machine did not.
+//
+// Measured on a hard disk. A floppy is slower again, and none of this has been
+// measured against one.
+const (
+	cycDiskCall = 69683
+	cycDiskByte = 19
+)
+
+// dosCost is what one disk function call costs before the bytes it moves, from
+// the same measurement: the median of every call of that function, with the
+// count in the comment. The calls nothing sampled keep a small default and are
+// marked, rather than being given a measured-looking number.
+func dosCost(fn byte) uint32 {
+	switch fn {
+	case 0x0F: // open -- 45 calls. A directory search, which is why it is
+		// dearer than reading a block.
+		return 179657
+	case 0x11, 0x12: // find first -- 2 calls; find next is the same search
+		// carried on, and was not called.
+		return 159200
+	case 0x16: // create -- 1 call
+		return 251141
+	case 0x10: // close -- 42 calls
+		return 19294
+	case 0x02: // one character to the console -- 236 calls
+		return 3150
+	case 0x1A: // set the transfer address -- 48 calls
+		return 394
+	case 0x19: // which drive is current -- 15 calls
+		return 394
+	case 0x6F: // which MSX-DOS this is -- 5 calls
+		return 286
+	case 0x14, 0x15, 0x21, 0x22, 0x26, 0x27, 0x2F, 0x30:
+		return cycDiskCall // and cycDiskByte a byte, charged where the
+		// count is known
+	}
+	return 400 // not measured
+}
 
 // cycVRAMByte is what one byte of a BIOS block transfer costs: the OUTI or the
 // OUT/DEC/JR that carries it, read out of C-BIOS's loops at 0278h and 02A4h.

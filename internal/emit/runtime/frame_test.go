@@ -67,3 +67,48 @@ func TestAFrameAfterAnOverrunGetsOneInterrupt(t *testing.T) {
 			"the clock still owed an interrupt when it started", got)
 	}
 }
+
+// A frame that spends its time in shims is not a runaway.
+//
+// FrameRunaway abandons a frame that has run for a hundred frames' worth of
+// cycles, on the grounds that it is a loop with no way out. Once disk calls
+// were charged what they really cost, King's Valley Plus's level load -- 67
+// block reads in one frame -- crossed that line, the frame was abandoned and
+// the game never drew again. The guard is looking for instructions going round
+// for ever; a shim charging for a kernel it did not run is the opposite of
+// that, so its time does not count. See tickShim.
+func TestShimTimeIsNotARunaway(t *testing.T) {
+	m := &M{Hz: 60}
+	// Somewhere into the run: frameStart of zero is the sentinel for "not
+	// inside a frame", and the guard is off then.
+	m.Cyc = 1000 * m.FrameCycles()
+	m.frameStart = m.Cyc
+
+	// Far more than FrameRunaway, all of it charged rather than executed.
+	for i := 0; i < FrameRunaway+50; i++ {
+		m.tickShim(uint32(m.FrameCycles()))
+	}
+	if m.Cyc-m.frameStart > FrameRunaway*m.FrameCycles() {
+		t.Errorf("after %d frames of shim time the guard sees %d frames' "+
+			"worth, and would abandon the frame", FrameRunaway+50,
+			(m.Cyc-m.frameStart)/m.FrameCycles())
+	}
+
+	// Executed time still reaches the guard, or a real runaway would never
+	// be caught. It abandons the frame by unwinding, so catch that.
+	caught := func() (fired bool) {
+		defer func() {
+			if r := recover(); r != nil {
+				_, fired = r.(runFinished)
+			}
+		}()
+		for i := 0; i < FrameRunaway+1; i++ {
+			m.tick(uint32(m.FrameCycles()))
+		}
+		return false
+	}()
+	if !caught {
+		t.Error("executed cycles no longer reach the guard, so a loop with " +
+			"no way out would run for ever")
+	}
+}

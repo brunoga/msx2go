@@ -60,6 +60,9 @@ func (m *M) dos() {
 	if m.DOSTrace != nil {
 		m.DOSTrace(fn, de)
 	}
+	// The kernel this stands for is thousands of instructions of FAT and
+	// directory work, and a game's loading is paced by it. See dosCost.
+	m.tickShim(dosCost(fn))
 	switch fn {
 	case 0x02: // write the character in E to the console
 		m.chPut(m.E)
@@ -127,11 +130,13 @@ func (m *M) dos() {
 			}
 		}
 	case 0x14: // read the record the file control block is sitting on
+		m.tickShim(uint32(m.dosRecLen(de)) * cycDiskByte)
 		m.A = m.dosRead(de, m.dosSeqPos(de))
 		if m.A == 0 {
 			m.dosBump(de)
 		}
 	case 0x15: // and write it
+		m.tickShim(uint32(m.dosRecLen(de)) * cycDiskByte)
 		m.A = m.dosWrite(de, m.dosSeqPos(de))
 		if m.A == 0 {
 			m.dosBump(de)
@@ -143,8 +148,10 @@ func (m *M) dos() {
 		m.dma = de
 		m.A = 0
 	case 0x21: // read the record the random field names
+		m.tickShim(uint32(m.dosRecLen(de)) * cycDiskByte)
 		m.A = m.dosRead(de, m.dosRandPos(de))
 	case 0x22: // and write it
+		m.tickShim(uint32(m.dosRecLen(de)) * cycDiskByte)
 		m.A = m.dosWrite(de, m.dosRandPos(de))
 	case 0x23: // how long is it, in records
 		m.A = 0xFF
@@ -170,6 +177,7 @@ func (m *M) dos() {
 			}
 			m.dma += uint16(rec)
 		}
+		m.tickShim(uint32(done*rec) * cycDiskByte)
 		m.dma -= uint16(done * rec)
 		m.setHL(uint16(done))
 		m.dosSetRandom(de, (pos+done*rec)/rec)
@@ -187,6 +195,7 @@ func (m *M) dos() {
 			disk = d
 		}
 		m.A = 0
+		m.tickShim(uint32(cnt*disk.bps) * cycDiskByte)
 		for i := 0; i < cnt; i++ {
 			if fn == 0x2F {
 				b := disk.ReadSector(sec + i)
@@ -635,7 +644,11 @@ func (m *M) diskROM(a uint16) {
 				m.wr(at+uint16(done*disk.bps+i), v)
 			}
 		}
-		m.tick(uint32(done*disk.bps) * cycVRAMByte)
+		// The disk ROM sits below the kernel, so none of dosCost's FAT
+		// and directory work applies -- but a byte off a disk costs
+		// what a byte off a disk costs, not what a byte into video
+		// memory costs, which is what this charged before.
+		m.tickShim(uint32(done*disk.bps) * cycDiskByte)
 		m.B = byte(done)
 		if done < want {
 			// "Not ready", which is what a drive says about a
