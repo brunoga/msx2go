@@ -149,6 +149,14 @@ type M struct {
 	// main-thread shape of cartridge. See dueVblank.
 	fDue uint64
 
+	// frameDue is when the current frame ends on the clock, advanced by
+	// exactly one frame per frame whatever the machine got through in the
+	// last one. It is how a handler that overran is made to pay the time
+	// back: the frames it already used are skipped rather than run again.
+	// See mainThreadFrame, and runFrame, which does the same with
+	// irqTaken.
+	frameDue uint64
+
 	// fhDue is when this frame's line interrupt comes due, in cycles. See
 	// armLine.
 	fhDue uint64

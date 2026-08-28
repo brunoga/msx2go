@@ -238,9 +238,29 @@ and order on both machines:
 |---|---|---|---|
 | longest scene | 7.8s | 37.5s | 39.1s |
 
-Within 4%, at `-hz 50`. What is left is the reads themselves: a block read
-costs this machine almost nothing and costs a real SunriseIDE a quarter of a
-second, so every loading pause is still shorter here than on the reference.
+Within 4%, at `-hz 50`.
+
+## Time that passed on the clock and not on the counter
+
+The loading stretches were still far too quick, and for a different reason.
+This game's loader decodes what it has just read *inside the interrupt
+handler*, and that takes far longer than a frame: three of the opening's
+frames ran 76, 66 and 144 frames' worth of cycles each, one of them 288. The
+work was all done -- but it was done inside a frame that had already been
+counted, so the emulated clock ran on while the frame counter did not, and
+640 frames of the opening simply vanished.
+
+`runFrame` has always paid that debt back, through `irqTaken`: spend more than
+a frame and the next frames go to paying it off, which is what the hardware
+does to a game whose handler overruns. `mainThreadFrame` never did. It does
+now, and the whole opening went from 40.0s to 51.5s against the reference's
+60.6s.
+
+What is left is work this machine does not do at all. A block read costs a
+real SunriseIDE and its Nextor kernel between 10 and 108 milliseconds --
+measured by breakpointing the return, 46 calls, about 20ms fixed plus 5.3us a
+byte -- and costs a shim nothing. Across the opening's DOS calls that is 3.8
+seconds the reference spends and this machine does not.
 
 **How not to measure this game.** With no keyboard input it stops on the
 options screen and stays there for ever, playing the menu's music -- which

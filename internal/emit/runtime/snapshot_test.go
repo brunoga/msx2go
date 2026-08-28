@@ -131,7 +131,7 @@ func TestSnapshotRejectsAnotherCartridge(t *testing.T) {
 // as the disk it booted from. A restore into a machine that has one puts the
 // bank registers, the paging and the RAM standing behind it back.
 func TestSnapshotCoversTheMachine(t *testing.T) {
-	const known = 111
+	const known = 112
 	if n := reflect.TypeOf(M{}).NumField(); n != known {
 		t.Errorf("M has %d fields, this test was written against %d. "+
 			"A new one may need adding to walk in snapshot.go.", n, known)

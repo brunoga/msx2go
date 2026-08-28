@@ -228,6 +228,21 @@ type dosFile struct {
 	dirty bool
 }
 
+// FCBBlock is what a block call will move: the byte offset in the file that
+// the random-record field names, and the record size it is counted in.
+//
+// A disk game's block reads are landmarks nothing else can fake -- the same
+// bytes in the same order however fast either machine runs -- so lining them
+// up against a reference machine's is how a loading sequence's timing is
+// checked at all. See games/snatcher/README.md.
+func (m *M) FCBBlock(fcb uint16) (pos, recLen int) {
+	return m.dosRandPos(fcb), m.dosRecLen(fcb)
+}
+
+// DMA is the address a disk read will land at, which the program sets with
+// function 1Ah.
+func (m *M) DMA() uint16 { return m.dma }
+
 // dosRecLen is the record size the file control block asks for, which is 128
 // unless the program set it.
 func (m *M) dosRecLen(fcb uint16) int {

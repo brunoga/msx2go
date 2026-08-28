@@ -261,6 +261,15 @@ func main() {
 				if fn != 0x1A && fn != 0x2F && fn != 0x30 {
 					name = " " + m.FCBName(de)
 				}
+				// A block read says which bytes of the file it
+				// is taking and where they land: those are the
+				// landmarks a reference machine's loading can
+				// be lined up against.
+				if fn == 0x26 || fn == 0x27 {
+					pos, rl := m.FCBBlock(de)
+					name += fmt.Sprintf(" pos=%X recs=%d bytes=%X dma=%04X",
+						pos, m.HL(), int(m.HL())*rl, m.DMA())
+				}
 				fmt.Fprintf(os.Stderr, "dos f%d fn=%02X de=%04X%s\n",
 					m.Frames(), fn, de, name)
 			}

@@ -237,6 +237,9 @@ func (m *M) walk(s snapper) {
 	// forgotten it was behind. See cycles.go.
 	s.u64(&m.Cyc)
 	s.u64(&m.lastIRQ)
+	// frameDue carries the same debt for the main-thread shape: a snapshot
+	// without it resumes a machine that has forgotten it owes time back.
+	s.u64(&m.frameDue)
 	s.i64(&m.credit)
 	s.int(&m.irqTaken)
 	s.int(&m.IM)

@@ -306,6 +306,27 @@ func (m *M) Frame() error {
 // delivered handler runs translated where a translation exists.
 func (m *M) mainThreadFrame() error {
 	m.frames++
+	// A frame is a fixed slice of the clock, and the clock is what the
+	// game is really running on. A handler that overran the last frame has
+	// already spent this one's time -- Snatcher's loader spends a hundred
+	// frames of it in a single handler, decoding what it just read -- so
+	// there is nothing here to deliver and nothing to run. On the hardware
+	// the vertical blanks that passed while it worked are simply gone.
+	//
+	// Without this the overrun vanished instead of being paid back: the
+	// emulated clock ran on while the frame counter did not, and 640
+	// frames of the opening's work were squeezed into frames that had
+	// already been counted. The game got through the right amount of work
+	// and reached the end of it far too early. runFrame has always paid
+	// the debt back, through irqTaken; this is the same rule for the
+	// main-thread shape.
+	if m.frameDue == 0 {
+		m.frameDue = m.Cyc
+	}
+	m.frameDue += m.FrameCycles()
+	if m.Cyc >= m.frameDue {
+		return nil
+	}
 	frameStart := m.Cyc
 	m.frameOrigin = frameStart
 	m.VDP.StartLog()
