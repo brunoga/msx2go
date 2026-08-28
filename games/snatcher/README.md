@@ -349,3 +349,35 @@ one, and per interrupt this machine spends about 89,000 cycles where a frame is
 about a quarter. It is not the M1 wait, the BIOS entries or the disk -- all
 three are now measured -- which leaves the VDP and screen shims, the thing a
 SCREEN 7 game leans on hardest.
+
+## The freeze, and why the debt is capped
+
+Paying the overrun back turned "too fast" into "frozen". A frame here can run
+hundreds of frames' worth of cycles -- the scene loader runs 2.5 million
+instructions in one, taking 319 nested interrupts as it goes, which is right
+and is what the reference does too. What is wrong is that all of it happens
+inside *one* call to `Frame`, so the harness draws once and then shows a
+frozen picture for every frame the debt skips.
+
+Measured over a 520-second play-through: freezes of 7.7, 11.7 and **14.2
+seconds**, 105 seconds of dead screen in total, the music holding one note
+throughout. Fourteen seconds of that is a hang as far as anyone watching is
+concerned, and it was reported as one -- right after the character name
+selection, which is where the first long one lands.
+
+The reference never does this. Breakpointing 0038h and counting entries a
+second through the same sequence, its interrupt rate never leaves 50 except
+for brief dips to 20; it is alive the whole way.
+
+So the debt is capped at `maxFrameDebt` frames. The short overruns that pace a
+scene are still paid back in full; the enormous ones, which are loading, are
+forgiven. Worst freeze goes from 14.22s to 0.30s and nothing exceeds half a
+second. The opening drops from 0.95x of the reference to 0.78x, and being
+early during a load is the least harmful thing this machine can be.
+
+**This is a stopgap and should not survive.** The real fix is for the machine
+to hand a picture and its sound back once per frame of *emulated* time rather
+than once per `Frame` call, so that a long handler is seen progressing instead
+of being invisible and then over. The machine already knows where those
+boundaries are -- it delivers a nested interrupt at each one. What it does not
+have is a way to let the harness draw from inside one.

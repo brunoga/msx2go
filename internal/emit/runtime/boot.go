@@ -320,10 +320,30 @@ func (m *M) mainThreadFrame() error {
 	// and reached the end of it far too early. runFrame has always paid
 	// the debt back, through irqTaken; this is the same rule for the
 	// main-thread shape.
+	//
+	// The debt is capped, and that cap is a stopgap rather than a model of
+	// anything. A frame here can run hundreds of frames' worth of cycles --
+	// Snatcher's scene loader runs 2.5 million instructions in one, and
+	// takes 319 nested interrupts while it does, which is the right
+	// behaviour and matches the reference. What is wrong is that all of it
+	// happens inside one call to Frame, so the harness draws once and then
+	// shows a frozen picture for every frame the debt skips. Uncapped that
+	// was fourteen seconds of dead screen with no music, which is a hang as
+	// far as anyone watching is concerned.
+	//
+	// The real fix is for the machine to hand a picture and its sound back
+	// once per frame of emulated time rather than once per Frame, so a long
+	// handler is *seen* progressing. Until then this bounds the damage: the
+	// short overruns that pace a scene are still paid back in full, and only
+	// the enormous ones -- which are loading, where being early is the least
+	// harmful thing this machine can be -- are forgiven.
 	if m.frameDue == 0 {
 		m.frameDue = m.Cyc
 	}
 	m.frameDue += m.FrameCycles()
+	if cap := maxFrameDebt * m.FrameCycles(); m.Cyc > m.frameDue+cap {
+		m.frameDue = m.Cyc - cap
+	}
 	if m.Cyc >= m.frameDue {
 		return nil
 	}

@@ -449,6 +449,21 @@ func (m *M) dueLine() {
 // fallback already has the machinery to unwind out of translated code.
 const FrameRunaway = 100
 
+// maxFrameDebt is how many frames of overrun mainThreadFrame will make a
+// machine pay back before forgiving the rest. See the note there: it exists
+// only because an overrunning frame freezes the picture for as long as the
+// debt lasts, and it should go away when the harness can be shown the frames
+// inside one.
+//
+// Fifteen is a thirtieth of a second, which is about what one of this
+// machine's disk reads costs on real hardware, so what is left reads as
+// loading rather than as a glitch. Measured on Snatcher: uncapped, its worst
+// freeze is 14.22s and 105 seconds of a 520-second run are a dead screen; at
+// fifteen the worst is 0.30s and nothing exceeds half a second. The cost is
+// the opening running at 0.78x of the reference rather than 0.95x, and being
+// early during a load is the least harmful thing this machine can be.
+const maxFrameDebt = 15
+
 // BootRunaway is how long INIT may run before the machine concludes that INIT
 // *is* the game loop rather than a preamble to one. Ten seconds of machine
 // time: no cartridge spends that setting itself up.
