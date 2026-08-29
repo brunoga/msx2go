@@ -81,8 +81,16 @@ func main() {
 		os.Exit(2)
 	}
 	if *dsk != "" {
-		if err := disk(*dsk, *name, *out, *modpath, *machine, *runBas,
-			*exploreN, *interpretOnly); err != nil {
+		if err := disk(*dsk, diskOpts{
+			name: *name, out: *out, modpath: *modpath,
+			machine: *machine, runBas: *runBas,
+			exploreBudget: *exploreN, interpretOnly: *interpretOnly,
+			sites:   sitesPath(*sitesFile, *out),
+			sweepN:  *sweepN,
+			quota:   *quota,
+			monkeys: *monkeys,
+			tape:    *tape,
+		}); err != nil {
 			die(err)
 		}
 		return
@@ -237,8 +245,25 @@ func interpreted(rom []byte, info z80.Info, out, modpath string, base uint16) er
 // What the disk *is* comes out of the image, so any disk can be handed over:
 // the geometry from its BIOS parameter block, the boot program from its
 // directory, and the shape of the program from booting it and watching.
-func disk(path, name, out, modpath, machine, runBas string,
-	exploreBudget int, interpretOnly bool) error {
+// diskOpts is what converting a floppy needs beyond the image itself.
+type diskOpts struct {
+	name, out, modpath, machine, runBas string
+	exploreBudget                       int
+	interpretOnly                       bool
+	// The sweep, which is what gives a floppy the coverage a cartridge
+	// gets. See sweep, and the call below for why it can only run once
+	// the loader has said where the program is.
+	sites   string
+	sweepN  int
+	quota   int
+	monkeys int
+	tape    string
+}
+
+func disk(path string, o diskOpts) error {
+	name, out, modpath := o.name, o.out, o.modpath
+	machine, runBas := o.machine, o.runBas
+	exploreBudget, interpretOnly := o.exploreBudget, o.interpretOnly
 	// One floppy, or several separated by commas: a game that shipped
 	// on three disks is converted whole, all three inside the program,
 	// and swapping between them is a keypress rather than a file hunt.
@@ -328,9 +353,12 @@ func disk(path, name, out, modpath, machine, runBas string,
 		// started -- is the one the runtime can reproduce exactly. A
 		// snapshot of that region is the translation's source, its
 		// hash the proof at run time that the floppy still makes the
-		// same program. Tracing starts from the interrupt hooks; the
-		// main thread stays interpreted, and sites.txt feeds back
-		// everything a run discovers. See -discover for cartridges.
+		// same program. Tracing starts from the interrupt hooks and
+		// from the sweep below, which watches the floppy run the way
+		// it watches a cartridge -- with the one difference that
+		// matters, described there: the same RAM holds different
+		// programs at different times, so an address is believed only
+		// while the bytes at it are still the ones being translated.
 		if lo, hi, ok := probe.LoadedRange(); ok && !interpretOnly {
 			snap = append([]byte(nil), probe.Mem[lo:int(hi)+1]...)
 			info.TransBase = lo
@@ -344,9 +372,30 @@ func disk(path, name, out, modpath, machine, runBas string,
 						Addr: trace.Addr(h), Reason: "interrupt hook"})
 				}
 			}
+			// A floppy's code does not exist until its loader has
+			// built it, so the sweep can only run here -- and only
+			// here is it known which addresses are worth writing
+			// down and which bytes they have to still be.
+			//
+			// Without it a floppy is traced from its interrupt
+			// hooks alone, and everything only an indirect jump
+			// reaches is missed. Breaker is traced from its hook to
+			// 400 instructions and by observation to 5131, and runs
+			// a third faster for it.
+			if o.sweepN > 0 && o.sites != "" {
+				if _, err := sweep(sweepOpts{
+					info: info, sites: o.sites,
+					frames: o.sweepN, quota: o.quota,
+					tape: o.tape, monkeys: o.monkeys,
+					disks: disks, diskRun: runBas, min: lo,
+					snap: snap, lo: lo,
+				}); err != nil {
+					return err
+				}
+			}
 			if exploreBudget > 0 && out != "" {
 				seen := map[string]bool{}
-				for _, f := range []string{sitesPath("", out),
+				for _, f := range []string{o.sites,
 					exploredPath(out)} {
 					if old, err := trace.ReadSites(f); err == nil {
 						for _, st := range old {
@@ -372,7 +421,7 @@ func disk(path, name, out, modpath, machine, runBas string,
 					"%d address(es), %d new\n",
 					exploreBudget, len(seen), len(seen)-before)
 			}
-			sites, err := trace.ReadSites(sitesPath("", out))
+			sites, err := trace.ReadSites(o.sites)
 			if err != nil {
 				return err
 			}

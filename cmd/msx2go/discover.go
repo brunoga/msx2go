@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -72,6 +73,54 @@ type sweepOpts struct {
 	quota   int
 	tape    string
 	monkeys int
+
+	// disks and diskRun make it a floppy sweep instead of a cartridge
+	// one: the machine boots the disk and its loader builds the program
+	// in RAM, which is the only way that code exists at all. What it
+	// executes after that is code, by observation, the same as for a
+	// cartridge.
+	disks   []*z80.Disk
+	diskRun string
+	// snap is the translated region as the loader left it, and lo where
+	// it begins. A floppy can load another program over that same RAM --
+	// King's Valley Plus has a game and a level editor that share it, and
+	// the loader's own inline code sits there before either -- so an
+	// address executed at some later moment need not be the code the
+	// translation was made from. Recording it anyway would have the
+	// tracer decode the wrong program's bytes and emit them as the right
+	// ones, which is the silent wrong answer this file exists to avoid:
+	// unguarded, it added 1423 instructions of one program decoded from
+	// another's bytes.
+	//
+	// So an address is only written down while the bytes *at that
+	// address* are still the ones that were translated. Comparing the
+	// whole region instead is useless: this kind of program keeps
+	// variables among its code, and one byte at 8923h changed by Breaker
+	// rejected all fifteen thousand of its frames.
+	snap []byte
+	lo   uint16
+	// min is the lowest address worth writing down. A cartridge's is
+	// 4000h, below which is the BIOS and shimmed; a floppy's is wherever
+	// its loader put the program.
+	min uint16
+}
+
+// sameAsTranslated reports whether the bytes at pc are still the ones the
+// translation was made from. A short window rather than one byte, because a
+// single byte matches by coincidence often enough to matter.
+func (o sweepOpts) sameAsTranslated(m *z80.M, pc uint16) bool {
+	if len(o.snap) == 0 {
+		return true // a cartridge is always its own code
+	}
+	i := int(pc) - int(o.lo)
+	if i < 0 || i >= len(o.snap) {
+		return false
+	}
+	n := 4
+	if i+n > len(o.snap) {
+		n = len(o.snap) - i
+	}
+	return bytes.Equal(m.Mem[int(pc):int(pc)+n], o.snap[i:i+n])
 }
 
 // sweep interprets the cartridge and writes down every address it executes.
@@ -91,11 +140,29 @@ func sweep(o sweepOpts) (int, error) {
 	}
 	before := len(seen)
 
+	min := o.min
+	if min == 0 {
+		min = 0x4000
+	}
 	run := func(seed int64) error {
-		m := z80.New(o.rom, o.info.Mapper)
+		var m *z80.M
+		if len(o.disks) > 0 {
+			m = z80.New(nil, z80.Mapper{})
+			for _, d := range o.disks {
+				m.AddDisk(d)
+			}
+			// InterpretRun boots with an empty start, which falls
+			// back to this. See BootDisk.
+			m.DiskRun = o.diskRun
+		} else {
+			m = z80.New(o.rom, o.info.Mapper)
+		}
 		m.Observe = func(pc uint16, banks []int) {
-			if pc < 0x4000 {
-				return // the BIOS, which is shims here
+			if pc < min {
+				return // the BIOS and the disk system, shims here
+			}
+			if !o.sameAsTranslated(m, pc) {
+				return
 			}
 			seen[siteLine(pc, banks)] = true
 		}
