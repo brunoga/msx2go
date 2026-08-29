@@ -1036,13 +1036,24 @@ func main() {
 		m.PSG.Log = true
 		m.SCC.SetSampleRate(wavRate)
 	}
+	// Sound is made from the clock, not from the call: one call to Frame is
+	// not one frame of emulated time, so a fixed number of samples a call
+	// compresses an overrunning frame's music into one frame of sound and
+	// stretches the silent calls after it. wavAcc carries the leftover
+	// fraction so it does not drift. See the harness, which does the same.
+	var wavAcc uint64
+	wavCyc := m.Cyc
 	err = m.InterpretRun(uint16(*base), *frames, *quota, func(f int) {
 		if synth != nil {
 			for _, x := range m.PSG.TakeWrites() {
 				synth.Write(x.Reg, x.Val)
 			}
-			if f >= *wavFrom {
-				buf := make([]int16, wavRate/60*2)
+			wavAcc += (m.Cyc - wavCyc) * wavRate
+			wavCyc = m.Cyc
+			n := int(wavAcc / z80.CPUClock)
+			wavAcc %= z80.CPUClock
+			if f >= *wavFrom && n > 0 {
+				buf := make([]int16, n*2)
 				synth.Synthesize(buf)
 				m.SCC.Synthesize(buf)
 				pcm = append(pcm, buf...)

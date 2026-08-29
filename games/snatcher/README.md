@@ -453,3 +453,28 @@ this any more: the display bit is read once for the frame.
 The mode, page, scroll and sprite tables are still followed down the raster,
 which is what the scanline replay is for. All eight battery titles render the
 same three frames byte for byte, Space Manbow's split panel included.
+
+## Sound made from the clock
+
+The music sped up and slowed down all the way through, never holding a pace.
+
+One call to `Frame` is not one frame of emulated time. A handler that overruns
+runs several frames' worth in a single call, and the calls after it run none at
+all while the debt is paid back. Both the window and `-wav` made a fixed number
+of samples per *call*, so the overrunning call advanced the driver a dozen
+frames and was given one frame of sound -- a burst -- and the silent calls
+after it were each given a frame of sound out of a register file that was not
+moving -- a drag. Every load and every scene change did it.
+
+Sound is now made from the clock: the samples a call produces are what the
+cycles it ran are worth, with the leftover fraction carried so it cannot drift
+against the card. A call that ran no cycles makes no sound at all, which is
+right -- no time passed.
+
+Measured on eight hundred frames of the title screen, past the loading: 16.01
+seconds of sound for 16.00 seconds of frames, 1.000x.
+
+`-wav` had a second fault of its own. It made `44100/60` samples a frame
+whatever `-hz` said, so a 50Hz recording came out a fifth short -- 25 seconds
+of sound for 30 seconds of frames -- and every measurement taken off one was
+wrong by that much.

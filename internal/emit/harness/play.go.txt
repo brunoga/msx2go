@@ -101,7 +101,8 @@ func main() {
 	// One frame of sound is the sample rate divided by the frames a second
 	// the machine is being run at, which is what -hz and -speed set.
 	g := &game{m: m, rend: z80.NewRenderer(),
-		snd:    newSound(m, int(float64(sampleRate)/(float64(*hz)**speed))),
+		snd: newSound(m, int(float64(sampleRate)/(float64(*hz)**speed)),
+			uint64(float64(z80.CPUClock)**speed)),
 		state:  *state,
 		border: *border}
 	startAudio(g.snd)
@@ -267,6 +268,7 @@ func (g *game) Update() error {
 			}
 		}
 	}
+	cyc0 := g.m.Cyc
 	if err := g.m.Frame(); err != nil {
 		g.dead = true
 		fmt.Fprintln(os.Stderr, "__NAME__:", err)
@@ -280,7 +282,7 @@ func (g *game) Update() error {
 	// The sound driver writes the chip's registers once a frame, so once a
 	// frame is when the synthesiser needs to hear about them. Anything
 	// finer would be inventing timing the cartridge never had.
-	g.snd.frame(&g.m.PSG)
+	g.snd.frame(&g.m.PSG, g.m.Cyc-cyc0)
 	return nil
 }
 
@@ -439,8 +441,17 @@ type sound struct {
 	scc *z80.SCC
 
 	// perFrame is how many stereo samples one emulated frame is worth.
-	// At the standard sixty frames a second that is 735.
+	// At the standard sixty frames a second that is 735. It sizes the
+	// cushion and the high-water mark; how many samples a call actually
+	// makes comes from the clock. See frame.
 	perFrame int
+	// acc carries the fraction of a sample left over from the last call,
+	// so that sound made from a cycle count does not drift against the
+	// card's own clock.
+	acc uint64
+	// cycPerSec is the emulated clock the sample count is derived from,
+	// divided by the -speed the window is being run at.
+	cycPerSec uint64
 	// ring holds them until the card asks, oldest first, interleaved.
 	ring []int16
 	// last is the pair most recently played, held when the ring runs dry
@@ -461,7 +472,7 @@ type sound struct {
 // cover the difference between a timer and a crystal.
 func (s *sound) cushion() int { return s.perFrame * 2 * 3 }
 
-func newSound(m *z80.M, perFrame int) *sound {
+func newSound(m *z80.M, perFrame int, cycPerSec uint64) *sound {
 	// Recording the writes, rather than reading the register file back, is
 	// the whole of what the synthesiser needs to hear. See frame.
 	m.PSG.Log = true
@@ -473,7 +484,8 @@ func newSound(m *z80.M, perFrame int) *sound {
 	// moment are not in the log, and a driver sets some registers only
 	// once. See Synth.Prime.
 	sy.Prime(m.PSG.Reg)
-	return &sound{synth: sy, scc: &m.SCC, perFrame: perFrame}
+	return &sound{synth: sy, scc: &m.SCC, perFrame: perFrame,
+		cycPerSec: cycPerSec}
 }
 
 // frame hands the synthesiser the writes the driver actually made, in order,
@@ -497,14 +509,34 @@ func (s *sound) prime(p *z80.PSG) {
 	s.synth.Prime(p.Reg)
 }
 
-func (s *sound) frame(p *z80.PSG) {
+func (s *sound) frame(p *z80.PSG, cyc uint64) {
 	w := p.TakeWrites()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, x := range w {
 		s.synth.Write(x.Reg, x.Val)
 	}
-	buf := make([]int16, s.perFrame*2)
+	// As many samples as the clock moved, not as many as a call is worth.
+	//
+	// One call to Frame is not one frame of emulated time. A handler that
+	// overruns runs several frames' worth in one call and the calls after
+	// it run none at all while the debt is paid back, so a fixed number of
+	// samples a call makes the music lurch: the overrunning call advances
+	// the driver many frames and is given one frame of sound, and the
+	// silent calls that follow are given a frame of sound each out of a
+	// register file that is not moving. It speeds up and slows down all the
+	// way through, which is what it sounded like.
+	//
+	// The accumulator keeps the leftover fraction so this does not drift
+	// against the card, and a call that ran no cycles makes no sound at
+	// all, which is right: no time passed.
+	s.acc += cyc * uint64(sampleRate)
+	n := int(s.acc / s.cycPerSec)
+	s.acc %= s.cycPerSec
+	if n == 0 {
+		return
+	}
+	buf := make([]int16, n*2)
 	s.synth.Synthesize(buf)
 	s.scc.Synthesize(buf)
 	s.ring = append(s.ring, buf...)
