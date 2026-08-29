@@ -381,3 +381,46 @@ than once per `Frame` call, so that a long handler is seen progressing instead
 of being invisible and then over. The machine already knows where those
 boundaries are -- it delivers a nested interrupt at each one. What it does not
 have is a way to let the harness draw from inside one.
+
+## The bands, and a log that does not climb
+
+Every transition showed horizontal bands of white and black. They were the
+renderer's, not the game's.
+
+`SplitLog` is the frame's register writes, kept so the picture can be built a
+scanline at a time in whatever mode each line was really in. It is written in
+*time* order, and each entry carries the raster line the write landed on --
+which wraps at 262. A frame that runs longer than one frame's worth of raster
+therefore logs several passes down the screen, and the line numbers climb,
+wrap, and climb again. For a game whose handler is its main loop that is not
+an edge case, it is most frames.
+
+The replay walked the log once, assuming the lines only climbed. So at a wrap
+it applied a later pass's writes at the wrong scanlines. Snatcher's transition
+logs
+
+    [L4 R1=23] [L5 R8=0A] [L-1 R23=00] [L-1 R1=63] [L80 R1=23] [L154 R7=0F]
+
+-- the display blanked at line 80, and the write that turns it back on logged
+at line -1, *before* the line that blanked it. The replay never reached it, so
+every line below 80 was painted in the backdrop; at line 154 the backdrop
+turns white, and the result is a black band and then a white one, across the
+bottom of the screen, on every transition the game makes.
+
+What the hardware showed in that time was several frames. The one to show is
+the last, so the replay now finds where the log last restarts, folds
+everything before it into the registers the frame starts from, and replays
+only the final pass.
+
+None of the eight battery titles renders one pixel differently: their frames
+do not overrun, so their logs never wrap.
+
+Worth noting what this was *not*. The transition's content is right -- both
+machines fill the screen with the same byte and wipe it at the same rate, five
+rows every fifth of a second, starting at the same row -- and the white
+backdrop is right too, since the reference sets exactly the same one. Three
+earlier guesses (the frame debt, the window's border, the palette) were all
+wrong, and each was killed by comparing raw video memory rather than pictures,
+aligned on the wipe's own progress rather than on the clock. Our machine runs
+this stretch about 2.4 seconds ahead of the reference, so anything aligned on
+elapsed time compares two different moments and invents differences.

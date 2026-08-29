@@ -235,8 +235,38 @@ func (r *Renderer) scanlines(v *VDP) *image.RGBA {
 
 	lines := v.Lines()
 	r.use(lines, v.dotsPerLine())
-	regs := v.RegsAt(0)
+
+	// The log is in time order and its line numbers wrap, so a frame that
+	// ran longer than one frame's worth of raster -- ordinary for a game
+	// whose handler is its main loop -- logs several passes down the
+	// screen, and the line numbers climb, wrap, and climb again. The replay
+	// below walks the log once and assumes they only climb.
+	//
+	// A wrap therefore made it apply a later pass's writes at the wrong
+	// scanlines. Snatcher blanks the display partway down one pass and
+	// re-enables it during the next pass's blanking, which logs as a line
+	// *before* the one that blanked it; the replay never reached the
+	// re-enable, so every line below was painted in the backdrop. At a
+	// transition the backdrop is white, and the result was a white band
+	// across the bottom of the screen -- on every transition the game
+	// makes.
+	//
+	// What the hardware showed in that time was several frames. The one to
+	// show is the last, so find where the log last restarts, fold
+	// everything before that into the registers the frame starts from, and
+	// replay only the final pass.
 	next := 0
+	prev := -2
+	for i, e := range v.SplitLog {
+		if e.Line < prev {
+			next = i
+		}
+		prev = e.Line
+	}
+	regs := v.Reg
+	for i := len(v.SplitLog) - 1; i >= next; i-- {
+		regs[v.SplitLog[i].Reg] = v.SplitLog[i].Old
+	}
 	for y := 0; y < r.lines; y++ {
 		for next < len(v.SplitLog) && v.SplitLog[next].Line <= y {
 			e := v.SplitLog[next]
