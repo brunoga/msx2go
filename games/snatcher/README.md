@@ -430,3 +430,26 @@ wrong, and each was killed by comparing raw video memory rather than pictures,
 aligned on the wipe's own progress rather than on the clock. Our machine runs
 this stretch about 2.4 seconds ahead of the reference, so anything aligned on
 elapsed time compares two different moments and invents differences.
+
+## A blank the chip does not show
+
+What was left after that was nine lines: a black bar across the top of the
+blue title screen, from the moment the background turned blue until the typing
+began and painted over it.
+
+The game writes video memory with the display off. It drops register 1's
+display bit and puts it back a few lines later, and it does this while the
+raster is in the picture -- the bit goes down at display line 8 and back up at
+14. The renderer followed that down the raster and painted those lines in the
+backdrop, which on this screen is black.
+
+**The reference machine shows nothing there.** Its picture is one flat blue
+from the first line to the last, measured row by row, while its own register
+log has the bit dropped at line 8 -- breakpoint the address that drops it and
+it reports display lines 52, 8, 128, 190 and 56, all inside the picture. So
+the chip does not blank the lines a mid-frame write covers, and neither does
+this any more: the display bit is read once for the frame.
+
+The mode, page, scroll and sprite tables are still followed down the raster,
+which is what the scanline replay is for. All eight battery titles render the
+same three frames byte for byte, Space Manbow's split panel included.

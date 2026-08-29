@@ -129,3 +129,49 @@ func TestAPartialFinalPassIsNotReplayedEither(t *testing.T) {
 			"state that preceded it", painted)
 	}
 }
+
+// Register 1 bit 6 blanks the display, and a game that writes video memory
+// with the display off drops it and puts it back a few lines later. Snatcher
+// does that while the raster is in the picture -- the bit goes down at display
+// line 8 and back up at 14 -- and a replay that followed it painted those
+// lines in the backdrop: a black bar across the top of every screen it drew.
+//
+// The reference machine shows nothing there. Its picture on that screen is one
+// flat blue from the first line to the last, measured row by row, while its
+// own register log has the bit dropped at line 8. So the chip does not blank
+// the lines a mid-frame write covers.
+func TestAMidFrameBlankDoesNotPaintTheLinesItCovers(t *testing.T) {
+	var v VDP
+	v.Reset()
+	v.V9938 = true
+	v.VRAM = make([]byte, 0x20000)
+	v.WriteReg(0, 0x02)
+	v.WriteReg(1, 0x63) // display on for the frame
+	v.WriteReg(8, 0x20) // colour 0 opaque, so the picture is not the backdrop
+	v.WriteReg(7, 0x0F) // a backdrop that would show up loudly
+	v.WriteReg(16, 15)
+	v.WritePalette(0x77)
+	v.WritePalette(0x07)
+
+	// Down at line 7, back up at 16, the way the game writes video memory.
+	v.SplitLog = []RegEvent{
+		{Line: 7, Reg: 1, Old: 0x63, New: 0x23},
+		{Line: 8, Reg: 8, Old: 0x20, New: 0x2A},
+		{Line: 16, Reg: 1, Old: 0x23, New: 0x63},
+		{Line: 17, Reg: 8, Old: 0x2A, New: 0x20},
+	}
+
+	img := NewRenderer().RenderVDP(&v)
+	b := img.Bounds()
+	painted := 0
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		c := img.RGBAAt(b.Min.X, y)
+		if c.R > 200 && c.G > 200 && c.B > 200 {
+			painted++
+		}
+	}
+	if painted > 0 {
+		t.Errorf("%d lines were painted in the backdrop by a blank the "+
+			"reference machine does not show", painted)
+	}
+}

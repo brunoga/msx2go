@@ -275,6 +275,7 @@ func (r *Renderer) scanlines(v *VDP) *image.RGBA {
 		regs = v.RegsAt(0)
 		next = 0
 	}
+	displayOn := regs[1]&0x40 != 0
 	for y := 0; y < r.lines; y++ {
 		for next < len(v.SplitLog) && v.SplitLog[next].Line <= y {
 			e := v.SplitLog[next]
@@ -288,11 +289,21 @@ func (r *Renderer) scanlines(v *VDP) *image.RGBA {
 			// The backdrop byte is its own colour on screen 8.
 			back = grb332(regs[7])
 		}
-		// Register 1 bit 6 blanks the display. A cartridge changing
-		// mode mid-frame drops it for the line or two it takes to
-		// write the new set, and those lines are backdrop on the
-		// hardware too.
-		if y >= lines || regs[1]&0x40 == 0 {
+		// Register 1 bit 6 blanks the display, and it is read once for
+		// the frame rather than followed down the raster.
+		//
+		// Following it was measured wrong. A game that writes video
+		// memory with the display off drops the bit and puts it back a
+		// few lines later -- Snatcher does it while the raster is in
+		// the picture, at display line 8, and back at 14 -- and a
+		// replay that honoured that painted those lines in the
+		// backdrop: a black bar across the top of every screen it drew.
+		// The reference machine shows nothing there. Its picture on
+		// that screen is one flat blue from the first line to the last,
+		// measured row by row, while its own register log has the bit
+		// dropped at line 8. So the chip does not blank the lines a
+		// mid-frame write covers, and neither does this.
+		if y >= lines || !displayOn {
 			for x := 0; x < r.width; x++ {
 				r.set(x, y, back)
 			}
