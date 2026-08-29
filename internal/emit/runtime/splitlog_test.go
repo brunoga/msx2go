@@ -72,3 +72,60 @@ func TestAWrappedSplitLogReplaysOnlyTheLastPass(t *testing.T) {
 			"back on", blanked)
 	}
 }
+
+// The final pass of an overrunning frame is usually half-finished: the raster
+// stopped wherever the frame ended. Replaying just that pass -- which was the
+// first fix -- draws its own phantom, because everything above the line the
+// pass begins at is painted in whatever state preceded it. For a blanked
+// display that is a black strip from the top of the screen down to the line
+// the raster had reached, which is what Snatcher's transition to its blue
+// title screen showed.
+//
+// So a wrapped log is not replayed at all. The picture is drawn in the
+// registers the frame ended with, the one state that was certainly real.
+func TestAPartialFinalPassIsNotReplayedEither(t *testing.T) {
+	var v VDP
+	v.Reset()
+	v.V9938 = true
+	v.VRAM = make([]byte, 0x20000)
+	v.WriteReg(0, 0x02)
+	v.WriteReg(1, 0x63) // display on
+	v.WriteReg(8, 0x20) // colour 0 opaque
+	v.WriteReg(7, 0x0F)
+	v.WriteReg(16, 15)
+	v.WritePalette(0x77)
+	v.WritePalette(0x07)
+
+	// The shape Snatcher logs: a pass that blanks late, then a wrap into a
+	// pass that only got as far as line 189 before the frame ended.
+	v.SplitLog = []RegEvent{
+		{Line: 148, Reg: 1, Old: 0x63, New: 0x23},
+		{Line: 202, Reg: 1, Old: 0x23, New: 0x23},
+		{Line: 188, Reg: 23, Old: 0x00, New: 0x00}, // wrap
+		{Line: 189, Reg: 1, Old: 0x23, New: 0x63},
+	}
+	v.Reg[1] = 0x63 // the frame ended with the display on
+	v.Reg[7] = 0x0F
+
+	img := NewRenderer().RenderVDP(&v)
+	b := img.Bounds()
+	painted := 0
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		c := img.RGBAAt(b.Min.X, y)
+		same := true
+		for x := b.Min.X + 1; x < b.Max.X; x++ {
+			if img.RGBAAt(x, y) != c {
+				same = false
+				break
+			}
+		}
+		if same && c.R > 200 && c.G > 200 && c.B > 200 {
+			painted++
+		}
+	}
+	if painted > 0 {
+		t.Errorf("%d lines came out painted in the backdrop; the final pass "+
+			"begins partway down and everything above it was drawn in the "+
+			"state that preceded it", painted)
+	}
+}

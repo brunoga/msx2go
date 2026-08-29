@@ -407,10 +407,16 @@ every line below 80 was painted in the backdrop; at line 154 the backdrop
 turns white, and the result is a black band and then a white one, across the
 bottom of the screen, on every transition the game makes.
 
-What the hardware showed in that time was several frames. The one to show is
-the last, so the replay now finds where the log last restarts, folds
-everything before it into the registers the frame starts from, and replays
-only the final pass.
+What the hardware showed in that time was several frames, and **the last of
+them is usually half-finished** -- its raster stopped wherever the frame
+ended. So a wrapped log is not replayed at all: the picture is drawn in the
+registers the frame ended with, the one state that was certainly real.
+
+Replaying only the final pass was tried first and draws its own phantom. That
+pass begins at the line the raster had reached, so everything above it is
+painted in whatever state preceded it -- for a blanked display, a black strip
+from the top of the screen down to that line, which is what the transition
+into the blue title screen showed.
 
 None of the eight battery titles renders one pixel differently: their frames
 do not overrun, so their logs never wrap.

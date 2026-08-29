@@ -236,36 +236,44 @@ func (r *Renderer) scanlines(v *VDP) *image.RGBA {
 	lines := v.Lines()
 	r.use(lines, v.dotsPerLine())
 
-	// The log is in time order and its line numbers wrap, so a frame that
-	// ran longer than one frame's worth of raster -- ordinary for a game
-	// whose handler is its main loop -- logs several passes down the
-	// screen, and the line numbers climb, wrap, and climb again. The replay
-	// below walks the log once and assumes they only climb.
+	// The log is in time order and its line numbers wrap at 262, so a frame
+	// that ran longer than one frame's worth of raster -- ordinary for a
+	// game whose handler is its main loop -- logs several passes down the
+	// screen and the numbers climb, wrap, and climb again. The replay below
+	// walks the log once and assumes they only climb.
 	//
-	// A wrap therefore made it apply a later pass's writes at the wrong
-	// scanlines. Snatcher blanks the display partway down one pass and
-	// re-enables it during the next pass's blanking, which logs as a line
+	// A wrap therefore made it apply one pass's writes at another pass's
+	// scanlines. Snatcher blanks the display partway down a pass and turns
+	// it back on during the next pass's blanking, which logs as a line
 	// *before* the one that blanked it; the replay never reached the
-	// re-enable, so every line below was painted in the backdrop. At a
-	// transition the backdrop is white, and the result was a white band
-	// across the bottom of the screen -- on every transition the game
-	// makes.
+	// re-enable and painted every line below in the backdrop. At a
+	// transition that is a white band across the bottom of the screen, on
+	// every transition the game makes.
 	//
-	// What the hardware showed in that time was several frames. The one to
-	// show is the last, so find where the log last restarts, fold
-	// everything before that into the registers the frame starts from, and
-	// replay only the final pass.
-	next := 0
-	prev := -2
-	for i, e := range v.SplitLog {
-		if e.Line < prev {
-			next = i
+	// There is no honest way to draw such a frame as one picture: what the
+	// hardware showed while it ran was several, and the last of them is
+	// usually half-finished, its raster having stopped partway down. So a
+	// wrapped log is not replayed at all -- the picture is drawn in the
+	// registers the frame ended with, which is the one state that was
+	// certainly real. Replaying only the final pass was tried first and
+	// draws a different phantom: the pass begins at the line the raster had
+	// reached, so everything above it is painted in whatever state preceded
+	// it, which for a blanked display is a black strip down to that line.
+	//
+	// A frame that did not overrun keeps the scanline replay exactly as it
+	// was, which is every game in the battery: their logs never wrap.
+	wrapped := false
+	for i := 1; i < len(v.SplitLog); i++ {
+		if v.SplitLog[i].Line < v.SplitLog[i-1].Line {
+			wrapped = true
+			break
 		}
-		prev = e.Line
 	}
 	regs := v.Reg
-	for i := len(v.SplitLog) - 1; i >= next; i-- {
-		regs[v.SplitLog[i].Reg] = v.SplitLog[i].Old
+	next := len(v.SplitLog)
+	if !wrapped {
+		regs = v.RegsAt(0)
+		next = 0
 	}
 	for y := 0; y < r.lines; y++ {
 		for next < len(v.SplitLog) && v.SplitLog[next].Line <= y {
